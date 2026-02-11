@@ -1,0 +1,50 @@
+name: 'LingoGuard i18n Check'
+description: 'Catch hardcoded strings and i18n violations before merge'
+author: 'LingoGuard Team'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  scan-path:
+    description: 'Path to scan for i18n issues'
+    required: false
+    default: './src'
+
+  ignore-patterns:
+    description: 'Comma-separated list of patterns to ignore'
+    required: false
+    default: '**/*.test.ts,**/*.test.tsx,**/*.spec.ts,**/*.spec.tsx'
+
+  github-token:
+    description: 'GitHub token for posting comments'
+    required: true
+
+  openai-api-key:
+    description: 'OpenAI API key for AI-powered fix suggestions'
+    required: false
+
+  min-health-score:
+    description: 'Minimum acceptable health score (0-100)'
+    required: false
+    default: '70'
+
+  fail-on-high-severity:
+    description: 'Fail the check if high severity issues are found'
+    required: false
+    default: 'true'
+
+outputs:
+  health-score:
+    description: 'Computed health score (0-100)'
+
+  issues-found:
+    description: 'Total number of issues found'
+
+  results:
+    description: 'Full scan results as JSON'
+
+runs:
+  using: 'node20'
+  main: 'dist-action/index.js'
