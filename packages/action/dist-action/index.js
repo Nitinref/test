@@ -36630,7 +36630,7 @@ core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
 async function run() {
     try {
         // ✅ Get inputs
-        const scanPath = core.getInput('scan-path') || process.cwd();
+        const scanPath = core.getInput('scan-path') || process.env.GITHUB_WORKSPACE;
         const ignorePatterns = core.getInput('ignore-patterns')?.split(',') || [];
         const githubToken = core.getInput('github-token', { required: true });
         const openAiApiKey = core.getInput('openai-api-key'); // 🔥 updated
@@ -37524,19 +37524,18 @@ const path = __importStar(__nccwpck_require__(6928));
 class FileScanner {
     async scan(options) {
         const { scanPath, ignorePatterns = [], extensions = ['.js', '.jsx', '.ts', '.tsx'], } = options;
-        // Always resolve absolute path
-        const absolutePath = path.isAbsolute(scanPath)
+        const basePath = path.isAbsolute(scanPath)
             ? scanPath
             : path.resolve(process.cwd(), scanPath);
-        // Build extension pattern
-        const extPattern = extensions.length > 1
-            ? `**/*{${extensions.join(',')}}`
-            : `**/*${extensions[0]}`;
-        // IMPORTANT: Use forward slashes for glob
-        const pattern = `${absolutePath.replace(/\\/g, '/')}/${extPattern}`;
+        const cleanedExtensions = extensions.map(ext => ext.startsWith('.') ? ext.slice(1) : ext);
+        const pattern = cleanedExtensions.length > 1
+            ? `**/*.{${cleanedExtensions.join(',')}}`
+            : `**/*.${cleanedExtensions[0]}`;
         const files = await (0, glob_1.glob)(pattern, {
+            cwd: basePath,
             ignore: ignorePatterns,
             nodir: true,
+            absolute: true,
         });
         return files;
     }
