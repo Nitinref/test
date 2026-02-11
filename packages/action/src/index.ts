@@ -2,7 +2,11 @@ import * as core from '@actions/core';
 import { LingoGuard } from '@lingoguard/cli';
 import { GitHubClient } from './github-client';
 import { CommentFormatter } from './comment-formatter';
+import * as fs from 'fs';
+import * as path from 'path';
 
+core.info(`CWD: ${process.cwd()}`);
+core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
 async function run(): Promise<void> {
     try {
         // ✅ Get inputs
