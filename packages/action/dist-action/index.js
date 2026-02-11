@@ -36630,7 +36630,7 @@ core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
 async function run() {
     try {
         // ✅ Get inputs
-        const scanPath = core.getInput('scan-path') || process.cwd();
+        const scanPath = core.getInput('scan-path') || process.env.GITHUB_WORKSPACE;
         const ignorePatterns = core.getInput('ignore-patterns')?.split(',') || [];
         const githubToken = core.getInput('github-token', { required: true });
         const openAiApiKey = core.getInput('openai-api-key'); // 🔥 updated
