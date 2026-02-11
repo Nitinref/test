@@ -4,31 +4,30 @@ import { ScanOptions } from '../types';
 
 export class FileScanner {
   async scan(options: ScanOptions): Promise<string[]> {
-  const {
-  scanPath,
-  ignorePatterns = [],
-  extensions = ['.js', '.jsx', '.ts', '.tsx'],
-} = options;
+    const {
+      scanPath,
+      ignorePatterns = [],
+      extensions = ['.js', '.jsx', '.ts', '.tsx'],
+    } = options;
 
+    const basePath = path.isAbsolute(scanPath)
+      ? scanPath
+      : path.resolve(process.cwd(), scanPath);
 
-    // Always resolve absolute path
-const absolutePath = path.isAbsolute(scanPath)
-  ? scanPath
-  : path.resolve(process.cwd(), scanPath);
+    const cleanedExtensions = extensions.map(ext =>
+      ext.startsWith('.') ? ext.slice(1) : ext
+    );
 
-
-    // Build extension pattern
-    const extPattern =
-      extensions.length > 1
-        ? `**/*{${extensions.join(',')}}`
-        : `**/*${extensions[0]}`;
-
-    // IMPORTANT: Use forward slashes for glob
-    const pattern = `${absolutePath.replace(/\\/g, '/')}/${extPattern}`;
+    const pattern =
+      cleanedExtensions.length > 1
+        ? `**/*.{${cleanedExtensions.join(',')}}`
+        : `**/*.${cleanedExtensions[0]}`;
 
     const files = await glob(pattern, {
+      cwd: basePath,
       ignore: ignorePatterns,
       nodir: true,
+      absolute: true,
     });
 
     return files;
