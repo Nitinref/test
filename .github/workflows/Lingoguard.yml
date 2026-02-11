@@ -1,0 +1,17 @@
+# .github/workflows/lingoguard.yml
+name: LingoGuard
+
+on:
+  pull_request:
+
+jobs:
+  lingoguard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run LingoGuard
+        uses: your-username/lingoguard@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
