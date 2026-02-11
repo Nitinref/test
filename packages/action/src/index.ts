@@ -7,6 +7,9 @@ import * as path from 'path';
 
 core.info(`CWD: ${process.cwd()}`);
 core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
+core.info(`GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE}`);
+core.info(`process.cwd(): ${process.cwd()}`);
+
 async function run(): Promise<void> {
     try {
         // ✅ Get inputs

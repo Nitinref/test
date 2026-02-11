@@ -36627,6 +36627,8 @@ const comment_formatter_1 = __nccwpck_require__(3079);
 const fs = __importStar(__nccwpck_require__(9896));
 core.info(`CWD: ${process.cwd()}`);
 core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
+core.info(`GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE}`);
+core.info(`process.cwd(): ${process.cwd()}`);
 async function run() {
     try {
         // ✅ Get inputs
@@ -37524,6 +37526,7 @@ const path = __importStar(__nccwpck_require__(6928));
 class FileScanner {
     async scan(options) {
         const { scanPath, ignorePatterns = [], extensions = ['.js', '.jsx', '.ts', '.tsx'], } = options;
+        console.log("ScanPath received:", scanPath);
         const basePath = path.isAbsolute(scanPath)
             ? scanPath
             : path.resolve(process.cwd(), scanPath);

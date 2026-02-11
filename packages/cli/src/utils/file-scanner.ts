@@ -9,6 +9,8 @@ export class FileScanner {
       ignorePatterns = [],
       extensions = ['.js', '.jsx', '.ts', '.tsx'],
     } = options;
+   
+    console.log("ScanPath received:", scanPath);
 
     const basePath = path.isAbsolute(scanPath)
       ? scanPath
