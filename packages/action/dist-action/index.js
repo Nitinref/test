@@ -36624,6 +36624,9 @@ const core = __importStar(__nccwpck_require__(4442));
 const cli_1 = __nccwpck_require__(4548);
 const github_client_1 = __nccwpck_require__(5328);
 const comment_formatter_1 = __nccwpck_require__(3079);
+const fs = __importStar(__nccwpck_require__(9896));
+core.info(`CWD: ${process.cwd()}`);
+core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
 async function run() {
     try {
         // ✅ Get inputs
