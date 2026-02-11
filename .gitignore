@@ -3,4 +3,5 @@ dist-action
 node_modules
 *.js
 *.js.map
+.env.env
 .env
