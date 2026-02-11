@@ -4,70 +4,71 @@ import { GitHubClient } from './github-client';
 import { CommentFormatter } from './comment-formatter';
 
 async function run(): Promise<void> {
-  try {
-    // ✅ Get inputs
-    const scanPath = core.getInput('scan-path') || './src';
-    const ignorePatterns = core.getInput('ignore-patterns')?.split(',') || [];
-    const githubToken = core.getInput('github-token', { required: true });
-    const openAiApiKey = core.getInput('openai-api-key'); // 🔥 updated
-    const minHealthScore = parseInt(core.getInput('min-health-score') || '70');
-    const failOnHighSeverity = core.getInput('fail-on-high-severity') === 'true';
+    try {
+        // ✅ Get inputs
+        const scanPath = core.getInput('scan-path') || process.cwd();
 
-    core.info('🛡️  Starting LingoGuard scan...');
+        const ignorePatterns = core.getInput('ignore-patterns')?.split(',') || [];
+        const githubToken = core.getInput('github-token', { required: true });
+        const openAiApiKey = core.getInput('openai-api-key'); // 🔥 updated
+        const minHealthScore = parseInt(core.getInput('min-health-score') || '70');
+        const failOnHighSeverity = core.getInput('fail-on-high-severity') === 'true';
 
-    // ✅ Initialize scanner with OpenAI
-    const scanner = new LingoGuard({
-      openAiKey: openAiApiKey || process.env.OPENAI_API_KEY,
-    });
+        core.info('🛡️  Starting LingoGuard scan...');
 
-    // ✅ Run scan
-    const results = await scanner.scan({
-      scanPath,
-      ignorePatterns,
-      extensions: ['.js', '.jsx', '.ts', '.tsx'],
-      generateFixes: !!openAiApiKey,
-    });
+        // ✅ Initialize scanner with OpenAI
+        const scanner = new LingoGuard({
+            openAiKey: openAiApiKey || process.env.OPENAI_API_KEY,
+        });
 
-    core.info(`✓ Scan complete. Health Score: ${results.health.score}/100`);
+        // ✅ Run scan
+        const results = await scanner.scan({
+            scanPath,
+            ignorePatterns,
+            extensions: ['.js', '.jsx', '.ts', '.tsx'],
+            generateFixes: !!openAiApiKey,
+        });
 
-    // ✅ Format PR comment
-    const formatter = new CommentFormatter();
-    const comment = formatter.format(results);
+        core.info(`✓ Scan complete. Health Score: ${results.health.score}/100`);
 
-    // ✅ Post to GitHub PR
-    const githubClient = new GitHubClient(githubToken);
-    await githubClient.postComment(comment);
+        // ✅ Format PR comment
+        const formatter = new CommentFormatter();
+        const comment = formatter.format(results);
 
-    core.info('✓ Posted results to PR');
+        // ✅ Post to GitHub PR
+        const githubClient = new GitHubClient(githubToken);
+        await githubClient.postComment(comment);
 
-    // ✅ Set outputs
-    core.setOutput('health-score', results.health.score);
-    core.setOutput('issues-found', results.health.issuesFound);
-    core.setOutput('results', JSON.stringify(results));
+        core.info('✓ Posted results to PR');
 
-    // ✅ Determine check status
-    let conclusion: 'success' | 'failure' | 'neutral' = 'success';
-    let summary = `Health Score: ${results.health.score}/100`;
+        // ✅ Set outputs
+        core.setOutput('health-score', results.health.score);
+        core.setOutput('issues-found', results.health.issuesFound);
+        core.setOutput('results', JSON.stringify(results));
 
-    if (results.health.score < minHealthScore) {
-      conclusion = 'failure';
-      summary += ` (below minimum ${minHealthScore})`;
-      core.setFailed(summary);
-    } else if (
-      failOnHighSeverity &&
-      results.hardcoded.some((i) => i.severity === 'high')
-    ) {
-      conclusion = 'failure';
-      summary += ' - High severity issues found';
-      core.setFailed(summary);
+        // ✅ Determine check status
+        let conclusion: 'success' | 'failure' | 'neutral' = 'success';
+        let summary = `Health Score: ${results.health.score}/100`;
+
+        if (results.health.score < minHealthScore) {
+            conclusion = 'failure';
+            summary += ` (below minimum ${minHealthScore})`;
+            core.setFailed(summary);
+        } else if (
+            failOnHighSeverity &&
+            results.hardcoded.some((i) => i.severity === 'high')
+        ) {
+            conclusion = 'failure';
+            summary += ' - High severity issues found';
+            core.setFailed(summary);
+        }
+
+        await githubClient.createCheckRun(results);
+
+
+    } catch (error) {
+        core.setFailed(`Action failed: ${(error as Error).message}`);
     }
-
-    await githubClient.createCheckRun(results);
-
-
-  } catch (error) {
-    core.setFailed(`Action failed: ${(error as Error).message}`);
-  }
 }
 
 run();

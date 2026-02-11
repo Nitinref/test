@@ -12,7 +12,10 @@ export class FileScanner {
 
 
     // Always resolve absolute path
-    const absolutePath = path.resolve(process.cwd(), scanPath);
+const absolutePath = path.isAbsolute(scanPath)
+  ? scanPath
+  : path.resolve(process.cwd(), scanPath);
+
 
     // Build extension pattern
     const extPattern =

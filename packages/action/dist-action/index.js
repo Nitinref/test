@@ -36627,7 +36627,7 @@ const comment_formatter_1 = __nccwpck_require__(3079);
 async function run() {
     try {
         // ✅ Get inputs
-        const scanPath = core.getInput('scan-path') || './src';
+        const scanPath = core.getInput('scan-path') || process.cwd();
         const ignorePatterns = core.getInput('ignore-patterns')?.split(',') || [];
         const githubToken = core.getInput('github-token', { required: true });
         const openAiApiKey = core.getInput('openai-api-key'); // 🔥 updated
