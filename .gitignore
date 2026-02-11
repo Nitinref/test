@@ -1,5 +1,4 @@
 dist
-dist-action
 node_modules
 *.js
 *.js.map
