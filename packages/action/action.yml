@@ -10,7 +10,7 @@ inputs:
   scan-path:
     description: 'Path to scan for i18n issues'
     required: false
-    default: './src'
+    default: '.'
 
   ignore-patterns:
     description: 'Comma-separated list of patterns to ignore'
