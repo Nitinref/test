@@ -18,5 +18,7 @@ jobs:
       - name: Run LingoGuard
         uses: ./packages/action
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+         scan-path: .
+         github-token: ${{ secrets.GITHUB_TOKEN }}
+         openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
