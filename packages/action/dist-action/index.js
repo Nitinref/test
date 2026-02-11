@@ -37522,7 +37522,9 @@ class FileScanner {
     async scan(options) {
         const { scanPath, ignorePatterns = [], extensions = ['.js', '.jsx', '.ts', '.tsx'], } = options;
         // Always resolve absolute path
-        const absolutePath = path.resolve(process.cwd(), scanPath);
+        const absolutePath = path.isAbsolute(scanPath)
+            ? scanPath
+            : path.resolve(process.cwd(), scanPath);
         // Build extension pattern
         const extPattern = extensions.length > 1
             ? `**/*{${extensions.join(',')}}`
