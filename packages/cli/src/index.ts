@@ -37,11 +37,13 @@ export class LingoGuard {
 
     try {
       // 1️⃣ Find files
-      const files = await this.fileScanner.scan({
-        scanPath: options.scanPath,
-        ignorePatterns: options.ignorePatterns || [],
-        extensions: options.extensions || ['.js', '.jsx', '.ts', '.tsx'],
-      });
+     const files = options.filesOverride && options.filesOverride.length > 0
+  ? options.filesOverride
+  : await this.fileScanner.scan({
+      scanPath: options.scanPath,
+      ignorePatterns: options.ignorePatterns || [],
+      extensions: options.extensions || ['.js', '.jsx', '.ts', '.tsx'],
+    });
 
       spinner.text = `Found ${files.length} files. Analyzing...`;
 

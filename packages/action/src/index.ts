@@ -4,12 +4,40 @@ import { GitHubClient } from './github-client';
 import { CommentFormatter } from './comment-formatter';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 
 core.info(`CWD: ${process.cwd()}`);
 core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
 core.info(`GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE}`);
 core.info(`process.cwd(): ${process.cwd()}`);
 
+
+
+async function getChangedFiles(): Promise<string[]> {
+  try {
+    const base = process.env.GITHUB_BASE_REF;
+    if (!base) return [];
+
+    const diff = execSync(
+      `git diff --name-only origin/${base}...HEAD`,
+      { encoding: 'utf-8' }
+    );
+
+    const files = diff
+      .split('\n')
+      .filter(f =>
+        f.endsWith('.js') ||
+        f.endsWith('.ts') ||
+        f.endsWith('.jsx') ||
+        f.endsWith('.tsx')
+      )
+      .filter(Boolean);
+
+    return files;
+  } catch {
+    return [];
+  }
+}
 async function run(): Promise<void> {
     try {
         // ✅ Get inputs
@@ -30,12 +58,19 @@ async function run(): Promise<void> {
         });
 
         // ✅ Run scan
-        const results = await scanner.scan({
-            scanPath,
-            ignorePatterns,
-            extensions: ['.js', '.jsx', '.ts', '.tsx'],
-            generateFixes: !!openAiApiKey,
-        });
+      // 🔥 Detect changed files
+const changedFiles = await getChangedFiles();
+
+core.info(`Changed files detected: ${changedFiles.length}`);
+
+const results = await scanner.scan({
+    scanPath,
+    ignorePatterns,
+    extensions: ['.js', '.jsx', '.ts', '.tsx'],
+    generateFixes: !!openAiApiKey,
+    filesOverride: changedFiles.length > 0 ? changedFiles : undefined,
+});
+
 
         core.info(`✓ Scan complete. Health Score: ${results.health.score}/100`);
 
