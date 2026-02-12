@@ -36625,10 +36625,30 @@ const cli_1 = __nccwpck_require__(4548);
 const github_client_1 = __nccwpck_require__(5328);
 const comment_formatter_1 = __nccwpck_require__(3079);
 const fs = __importStar(__nccwpck_require__(9896));
+const child_process_1 = __nccwpck_require__(5317);
 core.info(`CWD: ${process.cwd()}`);
 core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
 core.info(`GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE}`);
 core.info(`process.cwd(): ${process.cwd()}`);
+async function getChangedFiles() {
+    try {
+        const base = process.env.GITHUB_BASE_REF;
+        if (!base)
+            return [];
+        const diff = (0, child_process_1.execSync)(`git diff --name-only origin/${base}...HEAD`, { encoding: 'utf-8' });
+        const files = diff
+            .split('\n')
+            .filter(f => f.endsWith('.js') ||
+            f.endsWith('.ts') ||
+            f.endsWith('.jsx') ||
+            f.endsWith('.tsx'))
+            .filter(Boolean);
+        return files;
+    }
+    catch {
+        return [];
+    }
+}
 async function run() {
     try {
         // ✅ Get inputs
@@ -36644,11 +36664,15 @@ async function run() {
             openAiKey: openAiApiKey || process.env.OPENAI_API_KEY,
         });
         // ✅ Run scan
+        // 🔥 Detect changed files
+        const changedFiles = await getChangedFiles();
+        core.info(`Changed files detected: ${changedFiles.length}`);
         const results = await scanner.scan({
             scanPath,
             ignorePatterns,
             extensions: ['.js', '.jsx', '.ts', '.tsx'],
             generateFixes: !!openAiApiKey,
+            filesOverride: changedFiles.length > 0 ? changedFiles : undefined,
         });
         core.info(`✓ Scan complete. Health Score: ${results.health.score}/100`);
         // ✅ Format PR comment
@@ -37279,11 +37303,13 @@ class LingoGuard {
         const spinner = (0, ora_1.default)('Scanning files...').start();
         try {
             // 1️⃣ Find files
-            const files = await this.fileScanner.scan({
-                scanPath: options.scanPath,
-                ignorePatterns: options.ignorePatterns || [],
-                extensions: options.extensions || ['.js', '.jsx', '.ts', '.tsx'],
-            });
+            const files = options.filesOverride && options.filesOverride.length > 0
+                ? options.filesOverride
+                : await this.fileScanner.scan({
+                    scanPath: options.scanPath,
+                    ignorePatterns: options.ignorePatterns || [],
+                    extensions: options.extensions || ['.js', '.jsx', '.ts', '.tsx'],
+                });
             spinner.text = `Found ${files.length} files. Analyzing...`;
             // 2️⃣ Detect hardcoded strings
             const hardcodedIssues = [];

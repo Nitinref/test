@@ -59,6 +59,8 @@ export interface ScanOptions {
   generateFixes?: boolean;
   lingoApiKey?: string;
   anthropicApiKey?: string;
+  filesOverride?: string[];
+
 }
 
 export interface CoverageData {
