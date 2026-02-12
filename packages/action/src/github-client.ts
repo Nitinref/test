@@ -1,7 +1,9 @@
 import { Octokit } from '@octokit/rest';
 import * as github from '@actions/github';
-import { ScanResult } from '@lingoguard/cli';
+import { ScanResult, DetectedIssue, FixSuggestion } from '@lingoguard/cli';
 import * as path from 'path';
+import { execSync } from 'child_process';
+import * as fs from 'fs';
 
 type CheckAnnotation = {
   path: string;
@@ -60,17 +62,108 @@ export class GitHubClient {
   }
 
   // --------------------------------------------------
-  // ✅ Create GitHub Check Run (Inline Annotations)
+  // 💡 Inline Review Suggestions (GitHub Suggestion Block)
+  // --------------------------------------------------
+  async createReviewComments(
+    issues: DetectedIssue[],
+    suggestions: Map<string, FixSuggestion>
+  ) {
+    const pr = this.context.payload.pull_request;
+    if (!pr) return;
+
+    const comments = issues
+      .filter(i => i.severity === 'high')
+      .slice(0, 5)
+      .map(issue => {
+        const suggestion = suggestions.get(issue.text);
+        if (!suggestion) return null;
+
+        return {
+          path: this.toRelativePath(issue.file),
+          line: issue.line,
+          side: "RIGHT",
+          body: `💡 Suggested Fix:
+
+\`\`\`suggestion
+${suggestion.suggestedCode.trim()}
+\`\`\`
+`
+        };
+      })
+      .filter(Boolean) as any[];
+
+    if (comments.length === 0) return;
+
+    await this.octokit.pulls.createReview({
+      owner: this.context.repo.owner,
+      repo: this.context.repo.repo,
+      pull_number: pr.number,
+      event: "COMMENT",
+      comments
+    });
+
+    console.log('Created inline suggestion review comments');
+  }
+
+  // --------------------------------------------------
+  // 🤖 Auto Fix Mode (Commit + Push)
+  // --------------------------------------------------
+  async applyAutoFixes(
+    issues: DetectedIssue[],
+    suggestions: Map<string, FixSuggestion>
+  ) {
+    const workspace = process.env.GITHUB_WORKSPACE;
+    if (!workspace) return;
+
+    let changed = false;
+
+    for (const issue of issues) {
+      const suggestion = suggestions.get(issue.text);
+      if (!suggestion) continue;
+
+      const filePath = issue.file;
+
+      if (!fs.existsSync(filePath)) continue;
+
+      let content = fs.readFileSync(filePath, 'utf-8');
+
+      if (!content.includes(issue.text)) continue;
+
+      content = content.replace(issue.text, suggestion.suggestedCode);
+
+      fs.writeFileSync(filePath, content);
+      changed = true;
+    }
+
+    if (!changed) {
+      console.log('No changes applied in auto-fix');
+      return;
+    }
+
+    execSync('git config user.name "lingoguard-bot"');
+    execSync('git config user.email "bot@lingoguard.dev"');
+
+    execSync('git add .');
+
+    try {
+      execSync('git commit -m "🤖 LingoGuard Auto Fixes"');
+      execSync('git push');
+      console.log('Auto-fix committed and pushed');
+    } catch {
+      console.log('No commit created (possibly no changes)');
+    }
+  }
+
+  // --------------------------------------------------
+  // ✅ Create GitHub Check Run
   // --------------------------------------------------
   async createCheckRun(results: ScanResult): Promise<void> {
     const { owner, repo } = this.context.repo;
     const pullRequest = this.context.payload.pull_request;
-
     if (!pullRequest) return;
 
     const headSha = pullRequest.head.sha;
 
-    // 🔥 Fail if high severity OR health score < 70
     const hasHighSeverity = results.hardcoded.some(
       (i) => i.severity === 'high'
     );
@@ -80,7 +173,6 @@ export class GitHubClient {
         ? 'failure'
         : 'success';
 
-    // Build safe annotations (max 50 allowed per request)
     const annotations: CheckAnnotation[] = results.hardcoded
       .filter((issue) => issue.line > 0)
       .map((issue) => ({
@@ -117,6 +209,7 @@ export class GitHubClient {
   // 🔧 Convert absolute path → repo relative
   // --------------------------------------------------
   private toRelativePath(fullPath: string): string {
-    return path.relative(process.cwd(), fullPath).replace(/\\/g, '/');
+    const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
+    return path.relative(workspace, fullPath).replace(/\\/g, '/');
   }
 }

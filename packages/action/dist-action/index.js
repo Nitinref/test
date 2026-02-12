@@ -36486,6 +36486,8 @@ exports.GitHubClient = void 0;
 const rest_1 = __nccwpck_require__(9360);
 const github = __importStar(__nccwpck_require__(5251));
 const path = __importStar(__nccwpck_require__(6928));
+const child_process_1 = __nccwpck_require__(5317);
+const fs = __importStar(__nccwpck_require__(9896));
 class GitHubClient {
     octokit;
     context = github.context;
@@ -36493,7 +36495,7 @@ class GitHubClient {
         this.octokit = new rest_1.Octokit({ auth: token });
     }
     // --------------------------------------------------
-    // 💬 Create or Update PR Comment
+    // 💬 Post or Update PR Comment
     // --------------------------------------------------
     async postComment(comment) {
         const { owner, repo } = this.context.repo;
@@ -36527,14 +36529,90 @@ class GitHubClient {
         }
     }
     // --------------------------------------------------
-    // ✅ Create Check Run with Inline Annotations
+    // 💡 Inline Review Suggestions (GitHub Suggestion Block)
     // --------------------------------------------------
-    async createCheckRun(results) {
-        const { owner, repo } = this.context.repo;
+    async createReviewComments(issues, suggestions) {
         const pr = this.context.payload.pull_request;
         if (!pr)
             return;
-        const headSha = pr.head.sha;
+        const comments = issues
+            .filter(i => i.severity === 'high')
+            .slice(0, 5)
+            .map(issue => {
+            const suggestion = suggestions.get(issue.text);
+            if (!suggestion)
+                return null;
+            return {
+                path: this.toRelativePath(issue.file),
+                line: issue.line,
+                side: "RIGHT",
+                body: `💡 Suggested Fix:
+
+\`\`\`suggestion
+${suggestion.suggestedCode.trim()}
+\`\`\`
+`
+            };
+        })
+            .filter(Boolean);
+        if (comments.length === 0)
+            return;
+        await this.octokit.pulls.createReview({
+            owner: this.context.repo.owner,
+            repo: this.context.repo.repo,
+            pull_number: pr.number,
+            event: "COMMENT",
+            comments
+        });
+        console.log('Created inline suggestion review comments');
+    }
+    // --------------------------------------------------
+    // 🤖 Auto Fix Mode (Commit + Push)
+    // --------------------------------------------------
+    async applyAutoFixes(issues, suggestions) {
+        const workspace = process.env.GITHUB_WORKSPACE;
+        if (!workspace)
+            return;
+        let changed = false;
+        for (const issue of issues) {
+            const suggestion = suggestions.get(issue.text);
+            if (!suggestion)
+                continue;
+            const filePath = issue.file;
+            if (!fs.existsSync(filePath))
+                continue;
+            let content = fs.readFileSync(filePath, 'utf-8');
+            if (!content.includes(issue.text))
+                continue;
+            content = content.replace(issue.text, suggestion.suggestedCode);
+            fs.writeFileSync(filePath, content);
+            changed = true;
+        }
+        if (!changed) {
+            console.log('No changes applied in auto-fix');
+            return;
+        }
+        (0, child_process_1.execSync)('git config user.name "lingoguard-bot"');
+        (0, child_process_1.execSync)('git config user.email "bot@lingoguard.dev"');
+        (0, child_process_1.execSync)('git add .');
+        try {
+            (0, child_process_1.execSync)('git commit -m "🤖 LingoGuard Auto Fixes"');
+            (0, child_process_1.execSync)('git push');
+            console.log('Auto-fix committed and pushed');
+        }
+        catch {
+            console.log('No commit created (possibly no changes)');
+        }
+    }
+    // --------------------------------------------------
+    // ✅ Create GitHub Check Run
+    // --------------------------------------------------
+    async createCheckRun(results) {
+        const { owner, repo } = this.context.repo;
+        const pullRequest = this.context.payload.pull_request;
+        if (!pullRequest)
+            return;
+        const headSha = pullRequest.head.sha;
         const hasHighSeverity = results.hardcoded.some((i) => i.severity === 'high');
         const conclusion = hasHighSeverity || results.health.score < 70
             ? 'failure'
@@ -36563,60 +36641,16 @@ class GitHubClient {
                 title: 'LingoGuard i18n Report',
                 summary: `Health Score: ${results.health.score}/100`,
             },
-            annotations: annotations.slice(0, 50), // GitHub limit
+            annotations: annotations.slice(0, 50),
         });
         console.log('Created GitHub check run');
-    }
-    // --------------------------------------------------
-    // 💡 Inline One-Click Suggestions
-    // --------------------------------------------------
-    async createReviewComments(issues, suggestions) {
-        const pr = this.context.payload.pull_request;
-        if (!pr)
-            return;
-        const { owner, repo } = this.context.repo;
-        const commitId = pr.head.sha;
-        const comments = issues
-            .filter((i) => i.severity === 'high')
-            .slice(0, 5)
-            .map((issue) => {
-            const suggestion = suggestions.get(issue.text);
-            const relativePath = this.toRelativePath(issue.file);
-            return {
-                path: relativePath,
-                line: issue.line,
-                side: 'RIGHT',
-                body: suggestion
-                    ? `💡 Suggested Fix
-
-\`\`\`suggestion
-${suggestion.suggestedCode.trim()}
-\`\`\`
-`
-                    : `🚨 Hardcoded string detected:
-
-\`${issue.text}\``,
-            };
-        });
-        if (comments.length === 0)
-            return;
-        await this.octokit.pulls.createReview({
-            owner,
-            repo,
-            pull_number: pr.number,
-            commit_id: commitId,
-            event: 'COMMENT',
-            comments,
-        });
-        console.log('Created inline review suggestions');
     }
     // --------------------------------------------------
     // 🔧 Convert absolute path → repo relative
     // --------------------------------------------------
     toRelativePath(fullPath) {
-        return path
-            .relative(process.env.GITHUB_WORKSPACE || process.cwd(), fullPath)
-            .replace(/\\/g, '/');
+        const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
+        return path.relative(workspace, fullPath).replace(/\\/g, '/');
     }
 }
 exports.GitHubClient = GitHubClient;
@@ -36667,19 +36701,14 @@ const core = __importStar(__nccwpck_require__(4442));
 const cli_1 = __nccwpck_require__(4548);
 const github_client_1 = __nccwpck_require__(5328);
 const comment_formatter_1 = __nccwpck_require__(3079);
-const fs = __importStar(__nccwpck_require__(9896));
 const child_process_1 = __nccwpck_require__(5317);
 const github = __importStar(__nccwpck_require__(5251));
-core.info(`CWD: ${process.cwd()}`);
-core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
-core.info(`GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE}`);
-core.info(`process.cwd(): ${process.cwd()}`);
 async function getChangedFiles() {
     try {
         const base = github.context.payload.pull_request?.base.ref;
         if (!base)
             return [];
-        // Make sure base branch is fetched
+        // Ensure base branch is fetched
         (0, child_process_1.execSync)(`git fetch origin ${base}`, { stdio: 'ignore' });
         const diff = (0, child_process_1.execSync)(`git diff --name-only origin/${base}...HEAD`, { encoding: 'utf-8' });
         return diff
@@ -36690,28 +36719,38 @@ async function getChangedFiles() {
             f.endsWith('.tsx'))
             .filter(Boolean);
     }
-    catch {
+    catch (error) {
+        core.warning('Could not determine changed files.');
         return [];
     }
 }
 async function run() {
     try {
-        // ✅ Get inputs
+        // ==============================
+        // 🔹 Inputs
+        // ==============================
         const scanPath = core.getInput('scan-path') || process.env.GITHUB_WORKSPACE;
         const ignorePatterns = core.getInput('ignore-patterns')?.split(',') || [];
         const githubToken = core.getInput('github-token', { required: true });
-        const openAiApiKey = core.getInput('openai-api-key'); // 🔥 updated
+        const openAiApiKey = core.getInput('openai-api-key');
         const minHealthScore = parseInt(core.getInput('min-health-score') || '70');
         const failOnHighSeverity = core.getInput('fail-on-high-severity') === 'true';
-        core.info('🛡️  Starting LingoGuard scan...');
-        // ✅ Initialize scanner with OpenAI
+        const autoFix = core.getInput('auto-fix') === 'true';
+        core.info('🛡️ Starting LingoGuard scan...');
+        // ==============================
+        // 🔹 Initialize Scanner
+        // ==============================
         const scanner = new cli_1.LingoGuard({
             openAiKey: openAiApiKey || process.env.OPENAI_API_KEY,
         });
-        // ✅ Run scan
-        // 🔥 Detect changed files
+        // ==============================
+        // 🔹 Detect Changed Files
+        // ==============================
         const changedFiles = await getChangedFiles();
         core.info(`Changed files detected: ${changedFiles.length}`);
+        // ==============================
+        // 🔹 Run Scan
+        // ==============================
         const results = await scanner.scan({
             scanPath,
             ignorePatterns,
@@ -36720,27 +36759,44 @@ async function run() {
             filesOverride: changedFiles.length > 0 ? changedFiles : undefined,
         });
         core.info(`✓ Scan complete. Health Score: ${results.health.score}/100`);
-        // ✅ Format PR comment
+        // ==============================
+        // 🔹 Format PR Comment
+        // ==============================
         const formatter = new comment_formatter_1.CommentFormatter();
         const comment = formatter.format(results);
-        // ✅ Post to GitHub PR
         const githubClient = new github_client_1.GitHubClient(githubToken);
         await githubClient.postComment(comment);
         core.info('✓ Posted results to PR');
-        // ✅ Set outputs
+        // ==============================
+        // 🔹 Inline Suggestions
+        // ==============================
+        await githubClient.createReviewComments(results.hardcoded, results.suggestions);
+        // ==============================
+        // 🔹 Auto Fix Mode
+        // ==============================
+        if (autoFix && results.suggestions.size > 0) {
+            core.info('🤖 Auto-fix enabled. Applying fixes...');
+            await githubClient.applyAutoFixes(results.hardcoded, results.suggestions);
+            core.info('✅ Auto-fixes committed and pushed.');
+        }
+        // ==============================
+        // 🔹 Create Check Run
+        // ==============================
+        await githubClient.createCheckRun(results);
+        // ==============================
+        // 🔹 Outputs
+        // ==============================
         core.setOutput('health-score', results.health.score);
         core.setOutput('issues-found', results.health.issuesFound);
         core.setOutput('results', JSON.stringify(results));
-        // Create inline suggestions first
-        await githubClient.createReviewComments(results.hardcoded, results.suggestions);
-        // Create check run
-        await githubClient.createCheckRun(results);
-        // Determine final failure state
+        // ==============================
+        // 🔹 Final Failure Logic
+        // ==============================
         if (results.health.score < minHealthScore) {
             core.setFailed(`Health Score ${results.health.score} below minimum ${minHealthScore}`);
         }
         else if (failOnHighSeverity &&
-            results.hardcoded.some((i) => i.severity === 'high')) {
+            results.hardcoded.some(i => i.severity === 'high')) {
             core.setFailed('High severity issues found');
         }
     }
