@@ -64,70 +64,85 @@ export class GitHubClient {
     // --------------------------------------------------
     // 💡 Inline Review Suggestions (Safe Version)
     // --------------------------------------------------
- async createReviewComments(
-  issues: DetectedIssue[],
-  suggestions: Map<string, FixSuggestion>
-) {
-  const pr = this.context.payload.pull_request;
-  if (!pr) return;
+    async createReviewComments(
+        issues: DetectedIssue[],
+        suggestions: Map<string, FixSuggestion>
+    ) {
+        const pr = this.context.payload.pull_request;
+        if (!pr) return;
 
-  const { owner, repo } = this.context.repo;
+        const { owner, repo } = this.context.repo;
 
-  const filesResponse = await this.octokit.pulls.listFiles({
-    owner,
-    repo,
-    pull_number: pr.number,
-  });
+        const filesResponse = await this.octokit.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: pr.number,
+        });
 
-  const comments: any[] = [];
+        const comments: any[] = [];
 
-  for (const issue of issues) {
-    if (issue.severity !== 'high') continue;
+        for (const issue of issues) {
+            if (issue.severity !== 'high') continue;
 
-    const relativePath = this.toRelativePath(issue.file);
+            const relativePath = this.toRelativePath(issue.file);
 
-    const fileData = filesResponse.data.find(
-      f => f.filename === relativePath
-    );
+            const fileData = filesResponse.data.find(
+                f => f.filename === relativePath
+            );
 
-    if (!fileData) continue;
+            if (!fileData || !fileData.patch) continue;
 
-    const suggestion = suggestions.get(issue.text);
-    if (!suggestion) continue;
+            const suggestion = suggestions.get(issue.text);
+            if (!suggestion) continue;
 
-    // 🔥 IMPORTANT: use position instead of line
-    comments.push({
-      path: relativePath,
-      position: fileData.patch
-        ? fileData.patch.split('\n').length - 1
-        : 1,
-      body: `💡 Suggested Fix:
+            // 🔥 Find exact diff position where text appears
+            const patchLines = fileData.patch.split('\n');
+
+            let position: number | null = null;
+
+            for (let i = 0; i < patchLines.length; i++) {
+                const line = patchLines[i];
+
+                // Only match added lines
+                if (line.startsWith('+') && line.includes(issue.text)) {
+                    position = i + 1; // GitHub uses 1-based index
+                    break;
+                }
+            }
+
+            if (!position) continue;
+
+            comments.push({
+                path: relativePath,
+                position,
+                body: `💡 Suggested Fix:
 
 \`\`\`suggestion
 ${suggestion.suggestedCode.trim()}
 \`\`\`
 `
-    });
+            });
 
-    break;
-  }
+            break; // only 1 suggestion for stability
+        }
 
-  if (comments.length === 0) {
-    console.log('No inline comments created');
-    return;
-  }
+        if (comments.length === 0) {
+            console.log('No inline comments created');
+            return;
+        }
 
-  await this.octokit.pulls.createReview({
-    owner,
-    repo,
-    pull_number: pr.number,
-    commit_id: pr.head.sha,
-    event: "COMMENT",
-    comments
-  });
+        await this.octokit.pulls.createReview({
+            owner,
+            repo,
+            pull_number: pr.number,
+            commit_id: pr.head.sha,
+            event: "COMMENT",
+            comments
+        });
 
-  console.log('Inline review created successfully');
-}
+        console.log('Inline review created successfully');
+    }
+
 
 
 

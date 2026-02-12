@@ -36547,17 +36547,27 @@ class GitHubClient {
                 continue;
             const relativePath = this.toRelativePath(issue.file);
             const fileData = filesResponse.data.find(f => f.filename === relativePath);
-            if (!fileData)
+            if (!fileData || !fileData.patch)
                 continue;
             const suggestion = suggestions.get(issue.text);
             if (!suggestion)
                 continue;
-            // 🔥 IMPORTANT: use position instead of line
+            // 🔥 Find exact diff position where text appears
+            const patchLines = fileData.patch.split('\n');
+            let position = null;
+            for (let i = 0; i < patchLines.length; i++) {
+                const line = patchLines[i];
+                // Only match added lines
+                if (line.startsWith('+') && line.includes(issue.text)) {
+                    position = i + 1; // GitHub uses 1-based index
+                    break;
+                }
+            }
+            if (!position)
+                continue;
             comments.push({
                 path: relativePath,
-                position: fileData.patch
-                    ? fileData.patch.split('\n').length - 1
-                    : 1,
+                position,
                 body: `💡 Suggested Fix:
 
 \`\`\`suggestion
@@ -36565,7 +36575,7 @@ ${suggestion.suggestedCode.trim()}
 \`\`\`
 `
             });
-            break;
+            break; // only 1 suggestion for stability
         }
         if (comments.length === 0) {
             console.log('No inline comments created');
