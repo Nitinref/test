@@ -2,9 +2,13 @@ name: LingoGuard
 
 on:
   pull_request:
+    types: [opened, synchronize]
+
+  issue_comment:
+    types: [created]
 
 permissions:
-  contents: read
+  contents: write          # 🔥 Required for auto-fix commits
   pull-requests: write
   checks: write
 
@@ -12,16 +16,43 @@ jobs:
   lingoguard:
     runs-on: ubuntu-latest
 
+    # 🔥 Only run slash command workflow if it's on a PR
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request)
+
     steps:
-      - uses: actions/checkout@v4
+
+      # =========================================
+      # 🔹 Checkout PR branch correctly
+      # =========================================
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.event.issue.pull_request.head.sha }}
 
+      # =========================================
+      # 🔹 Setup Node (important for local action)
+      # =========================================
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
+      # =========================================
+      # 🔹 Install dependencies (monorepo safe)
+      # =========================================
+      - name: Install dependencies
+        run: npm install
+
+      # =========================================
+      # 🔹 Run LingoGuard Action
+      # =========================================
       - name: Run LingoGuard
         uses: ./packages/action
         with:
-         scan-path: .
-         github-token: ${{ secrets.GITHUB_TOKEN }}
-         openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-         auto-fix: false   # IMPORTANT: keep false first
+          scan-path: .
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          auto-fix: false
