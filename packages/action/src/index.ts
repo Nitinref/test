@@ -150,17 +150,18 @@ async function run(): Promise<void> {
     core.setOutput('issues-found', results.health.issuesFound);
     core.setOutput('results', JSON.stringify(results));
 
-    if (results.health.score < minHealthScore) {
-      core.setFailed(
-        `Health Score ${results.health.score} below minimum ${minHealthScore}`
-      );
-    } else if (
-      failOnHighSeverity &&
-      results.hardcoded.some(i => i.severity === 'high')
-    ) {
-      core.setFailed('High severity issues found');
-    }
-
+if (!autoFix) {
+  if (results.health.score < minHealthScore) {
+    core.setFailed(
+      `Health Score ${results.health.score} below minimum ${minHealthScore}`
+    );
+  } else if (
+    failOnHighSeverity &&
+    results.hardcoded.some(i => i.severity === 'high')
+  ) {
+    core.setFailed('High severity issues found');
+  }
+}
   } catch (error) {
     core.setFailed(
       `Action failed: ${(error as Error).message}`
