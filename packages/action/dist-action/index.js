@@ -36342,15 +36342,12 @@ Total Issues: **${health.issuesFound}**
 \`${issue.text}\`
 
 ${suggestion ? `
-**💡 One-Click Fix (Apply directly in PR):**
-
-\`\`\`suggestion
-${suggestion.suggestedCode.trim()}
+**Suggested Fix:**
+\`\`\`jsx
+${suggestion.suggestedCode}
 \`\`\`
-
 **Translation Key:** \`${suggestion.suggestedKey}\`
 ` : ''}
-
 
 </details>`;
         });
@@ -36496,7 +36493,7 @@ class GitHubClient {
         this.octokit = new rest_1.Octokit({ auth: token });
     }
     // --------------------------------------------------
-    // 💬 Post or Update PR Comment
+    // 💬 Create or Update PR Comment
     // --------------------------------------------------
     async postComment(comment) {
         const { owner, repo } = this.context.repo;
@@ -36530,20 +36527,18 @@ class GitHubClient {
         }
     }
     // --------------------------------------------------
-    // ✅ Create GitHub Check Run (Inline Annotations)
+    // ✅ Create Check Run with Inline Annotations
     // --------------------------------------------------
     async createCheckRun(results) {
         const { owner, repo } = this.context.repo;
-        const pullRequest = this.context.payload.pull_request;
-        if (!pullRequest)
+        const pr = this.context.payload.pull_request;
+        if (!pr)
             return;
-        const headSha = pullRequest.head.sha;
-        // 🔥 Fail if high severity OR health score < 70
+        const headSha = pr.head.sha;
         const hasHighSeverity = results.hardcoded.some((i) => i.severity === 'high');
         const conclusion = hasHighSeverity || results.health.score < 70
             ? 'failure'
             : 'success';
-        // Build safe annotations (max 50 allowed per request)
         const annotations = results.hardcoded
             .filter((issue) => issue.line > 0)
             .map((issue) => ({
@@ -36568,15 +36563,60 @@ class GitHubClient {
                 title: 'LingoGuard i18n Report',
                 summary: `Health Score: ${results.health.score}/100`,
             },
-            annotations: annotations.slice(0, 50),
+            annotations: annotations.slice(0, 50), // GitHub limit
         });
         console.log('Created GitHub check run');
+    }
+    // --------------------------------------------------
+    // 💡 Inline One-Click Suggestions
+    // --------------------------------------------------
+    async createReviewComments(issues, suggestions) {
+        const pr = this.context.payload.pull_request;
+        if (!pr)
+            return;
+        const { owner, repo } = this.context.repo;
+        const commitId = pr.head.sha;
+        const comments = issues
+            .filter((i) => i.severity === 'high')
+            .slice(0, 5)
+            .map((issue) => {
+            const suggestion = suggestions.get(issue.text);
+            const relativePath = this.toRelativePath(issue.file);
+            return {
+                path: relativePath,
+                line: issue.line,
+                side: 'RIGHT',
+                body: suggestion
+                    ? `💡 Suggested Fix
+
+\`\`\`suggestion
+${suggestion.suggestedCode.trim()}
+\`\`\`
+`
+                    : `🚨 Hardcoded string detected:
+
+\`${issue.text}\``,
+            };
+        });
+        if (comments.length === 0)
+            return;
+        await this.octokit.pulls.createReview({
+            owner,
+            repo,
+            pull_number: pr.number,
+            commit_id: commitId,
+            event: 'COMMENT',
+            comments,
+        });
+        console.log('Created inline review suggestions');
     }
     // --------------------------------------------------
     // 🔧 Convert absolute path → repo relative
     // --------------------------------------------------
     toRelativePath(fullPath) {
-        return path.relative(process.cwd(), fullPath).replace(/\\/g, '/');
+        return path
+            .relative(process.env.GITHUB_WORKSPACE || process.cwd(), fullPath)
+            .replace(/\\/g, '/');
     }
 }
 exports.GitHubClient = GitHubClient;
@@ -36629,24 +36669,26 @@ const github_client_1 = __nccwpck_require__(5328);
 const comment_formatter_1 = __nccwpck_require__(3079);
 const fs = __importStar(__nccwpck_require__(9896));
 const child_process_1 = __nccwpck_require__(5317);
+const github = __importStar(__nccwpck_require__(5251));
 core.info(`CWD: ${process.cwd()}`);
 core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
 core.info(`GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE}`);
 core.info(`process.cwd(): ${process.cwd()}`);
 async function getChangedFiles() {
     try {
-        const base = process.env.GITHUB_BASE_REF;
+        const base = github.context.payload.pull_request?.base.ref;
         if (!base)
             return [];
+        // Make sure base branch is fetched
+        (0, child_process_1.execSync)(`git fetch origin ${base}`, { stdio: 'ignore' });
         const diff = (0, child_process_1.execSync)(`git diff --name-only origin/${base}...HEAD`, { encoding: 'utf-8' });
-        const files = diff
+        return diff
             .split('\n')
             .filter(f => f.endsWith('.js') ||
             f.endsWith('.ts') ||
             f.endsWith('.jsx') ||
             f.endsWith('.tsx'))
             .filter(Boolean);
-        return files;
     }
     catch {
         return [];
@@ -36689,21 +36731,18 @@ async function run() {
         core.setOutput('health-score', results.health.score);
         core.setOutput('issues-found', results.health.issuesFound);
         core.setOutput('results', JSON.stringify(results));
-        // ✅ Determine check status
-        let conclusion = 'success';
-        let summary = `Health Score: ${results.health.score}/100`;
+        // Create inline suggestions first
+        await githubClient.createReviewComments(results.hardcoded, results.suggestions);
+        // Create check run
+        await githubClient.createCheckRun(results);
+        // Determine final failure state
         if (results.health.score < minHealthScore) {
-            conclusion = 'failure';
-            summary += ` (below minimum ${minHealthScore})`;
-            core.setFailed(summary);
+            core.setFailed(`Health Score ${results.health.score} below minimum ${minHealthScore}`);
         }
         else if (failOnHighSeverity &&
             results.hardcoded.some((i) => i.severity === 'high')) {
-            conclusion = 'failure';
-            summary += ' - High severity issues found';
-            core.setFailed(summary);
+            core.setFailed('High severity issues found');
         }
-        await githubClient.createCheckRun(results);
     }
     catch (error) {
         core.setFailed(`Action failed: ${error.message}`);
