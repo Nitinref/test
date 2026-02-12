@@ -64,67 +64,70 @@ export class GitHubClient {
     // --------------------------------------------------
     // 💡 Inline Review Suggestions (Safe Version)
     // --------------------------------------------------
-    async createReviewComments(
-        issues: DetectedIssue[],
-        suggestions: Map<string, FixSuggestion>
-    ) {
-        const pr = this.context.payload.pull_request;
-        if (!pr) return;
+ async createReviewComments(
+  issues: DetectedIssue[],
+  suggestions: Map<string, FixSuggestion>
+) {
+  const pr = this.context.payload.pull_request;
+  if (!pr) return;
 
-        const { owner, repo } = this.context.repo;
+  const { owner, repo } = this.context.repo;
 
-        const filesResponse = await this.octokit.pulls.listFiles({
-            owner,
-            repo,
-            pull_number: pr.number,
-        });
+  const filesResponse = await this.octokit.pulls.listFiles({
+    owner,
+    repo,
+    pull_number: pr.number,
+  });
 
-        const changedFiles = filesResponse.data.map(f => f.filename);
+  const comments: any[] = [];
 
-        const comments: any[] = [];
+  for (const issue of issues) {
+    if (issue.severity !== 'high') continue;
 
-        for (const issue of issues) {
-            if (issue.severity !== 'high') continue;
+    const relativePath = this.toRelativePath(issue.file);
 
-            const relativePath = this.toRelativePath(issue.file);
+    const fileData = filesResponse.data.find(
+      f => f.filename === relativePath
+    );
 
-            // ✅ Proper check
-            if (!changedFiles.includes(relativePath)) continue;
+    if (!fileData) continue;
 
-            const suggestion = suggestions.get(issue.text);
-            if (!suggestion) continue;
+    const suggestion = suggestions.get(issue.text);
+    if (!suggestion) continue;
 
-            comments.push({
-                path: relativePath,
-                line: issue.line,
-                side: "RIGHT",
-                body: `💡 Suggested Fix:
+    // 🔥 IMPORTANT: use position instead of line
+    comments.push({
+      path: relativePath,
+      position: fileData.patch
+        ? fileData.patch.split('\n').length - 1
+        : 1,
+      body: `💡 Suggested Fix:
 
 \`\`\`suggestion
 ${suggestion.suggestedCode.trim()}
 \`\`\`
 `
-            });
+    });
 
-            if (comments.length >= 3) break;
-        }
+    break;
+  }
 
-        if (comments.length === 0) {
-            console.log('No inline comments to create');
-            return;
-        }
+  if (comments.length === 0) {
+    console.log('No inline comments created');
+    return;
+  }
 
-        await this.octokit.pulls.createReview({
-            owner,
-            repo,
-            pull_number: pr.number,
-            commit_id: pr.head.sha,
-            event: "COMMENT",
-            comments
-        });
+  await this.octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number: pr.number,
+    commit_id: pr.head.sha,
+    event: "COMMENT",
+    comments
+  });
 
-        console.log('Inline review created successfully');
-    }
+  console.log('Inline review created successfully');
+}
 
 
 

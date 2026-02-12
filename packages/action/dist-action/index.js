@@ -36541,22 +36541,23 @@ class GitHubClient {
             repo,
             pull_number: pr.number,
         });
-        const changedFiles = filesResponse.data.map(f => f.filename);
         const comments = [];
         for (const issue of issues) {
             if (issue.severity !== 'high')
                 continue;
             const relativePath = this.toRelativePath(issue.file);
-            // ✅ Proper check
-            if (!changedFiles.includes(relativePath))
+            const fileData = filesResponse.data.find(f => f.filename === relativePath);
+            if (!fileData)
                 continue;
             const suggestion = suggestions.get(issue.text);
             if (!suggestion)
                 continue;
+            // 🔥 IMPORTANT: use position instead of line
             comments.push({
                 path: relativePath,
-                line: issue.line,
-                side: "RIGHT",
+                position: fileData.patch
+                    ? fileData.patch.split('\n').length - 1
+                    : 1,
                 body: `💡 Suggested Fix:
 
 \`\`\`suggestion
@@ -36564,11 +36565,10 @@ ${suggestion.suggestedCode.trim()}
 \`\`\`
 `
             });
-            if (comments.length >= 3)
-                break;
+            break;
         }
         if (comments.length === 0) {
-            console.log('No inline comments to create');
+            console.log('No inline comments created');
             return;
         }
         await this.octokit.pulls.createReview({
