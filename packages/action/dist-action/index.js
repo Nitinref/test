@@ -36536,28 +36536,22 @@ class GitHubClient {
         if (!pr)
             return;
         const { owner, repo } = this.context.repo;
-        // Get PR files with patch info
-        const { data: files } = await this.octokit.pulls.listFiles({
+        const filesResponse = await this.octokit.pulls.listFiles({
             owner,
             repo,
             pull_number: pr.number,
         });
+        const changedFiles = filesResponse.data.map(f => f.filename);
         const comments = [];
         for (const issue of issues) {
             if (issue.severity !== 'high')
                 continue;
             const relativePath = this.toRelativePath(issue.file);
-            const file = files.find(f => f.filename === relativePath);
-            // 🔥 IMPORTANT: only comment if file has patch (meaning changed in PR)
-            if (!file || !file.patch)
+            // ✅ Proper check
+            if (!changedFiles.includes(relativePath))
                 continue;
             const suggestion = suggestions.get(issue.text);
             if (!suggestion)
-                continue;
-            // 🔥 Validate that line exists in patch
-            const patchLines = file.patch.split('\n');
-            const lineExists = patchLines.some(line => line.includes(issue.text));
-            if (!lineExists)
                 continue;
             comments.push({
                 path: relativePath,
@@ -36574,23 +36568,18 @@ ${suggestion.suggestedCode.trim()}
                 break;
         }
         if (comments.length === 0) {
-            console.log('No valid inline suggestions to post');
+            console.log('No inline comments to create');
             return;
         }
-        try {
-            await this.octokit.pulls.createReview({
-                owner,
-                repo,
-                pull_number: pr.number,
-                commit_id: pr.head.sha,
-                event: "COMMENT",
-                comments
-            });
-            console.log('✅ Inline review created');
-        }
-        catch (err) {
-            console.log('Inline review failed:', err);
-        }
+        await this.octokit.pulls.createReview({
+            owner,
+            repo,
+            pull_number: pr.number,
+            commit_id: pr.head.sha,
+            event: "COMMENT",
+            comments
+        });
+        console.log('Inline review created successfully');
     }
     // --------------------------------------------------
     // 🤖 Auto Fix Mode (Commit + Push)

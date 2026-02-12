@@ -6,244 +6,233 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 
 type CheckAnnotation = {
-  path: string;
-  start_line: number;
-  end_line: number;
-  annotation_level: 'notice' | 'warning' | 'failure';
-  message: string;
+    path: string;
+    start_line: number;
+    end_line: number;
+    annotation_level: 'notice' | 'warning' | 'failure';
+    message: string;
 };
 
 export class GitHubClient {
-  private octokit: Octokit;
-  private context = github.context;
+    private octokit: Octokit;
+    private context = github.context;
 
-  constructor(token: string) {
-    this.octokit = new Octokit({ auth: token });
-  }
-
-  // --------------------------------------------------
-  // 💬 Post or Update PR Comment
-  // --------------------------------------------------
-  async postComment(comment: string): Promise<void> {
-    const { owner, repo } = this.context.repo;
-    const prNumber = this.context.payload.pull_request?.number;
-
-    if (!prNumber) {
-      throw new Error('Not running inside a pull request context');
+    constructor(token: string) {
+        this.octokit = new Octokit({ auth: token });
     }
 
-    const comments = await this.octokit.issues.listComments({
-      owner,
-      repo,
-      issue_number: prNumber,
-    });
+    // --------------------------------------------------
+    // 💬 Post or Update PR Comment
+    // --------------------------------------------------
+    async postComment(comment: string): Promise<void> {
+        const { owner, repo } = this.context.repo;
+        const prNumber = this.context.payload.pull_request?.number;
 
-    const existing = comments.data.find((c) =>
-      c.body?.includes('LingoGuard i18n Report')
-    );
+        if (!prNumber) {
+            throw new Error('Not running inside a pull request context');
+        }
 
-    if (existing) {
-      await this.octokit.issues.updateComment({
-        owner,
-        repo,
-        comment_id: existing.id,
-        body: comment,
-      });
-      console.log('Updated existing LingoGuard comment');
-    } else {
-      await this.octokit.issues.createComment({
-        owner,
-        repo,
-        issue_number: prNumber,
-        body: comment,
-      });
-      console.log('Posted new LingoGuard comment');
+        const comments = await this.octokit.issues.listComments({
+            owner,
+            repo,
+            issue_number: prNumber,
+        });
+
+        const existing = comments.data.find((c) =>
+            c.body?.includes('LingoGuard i18n Report')
+        );
+
+        if (existing) {
+            await this.octokit.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: comment,
+            });
+            console.log('Updated existing LingoGuard comment');
+        } else {
+            await this.octokit.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body: comment,
+            });
+            console.log('Posted new LingoGuard comment');
+        }
     }
-  }
 
-  // --------------------------------------------------
-  // 💡 Inline Review Suggestions (Safe Version)
-  // --------------------------------------------------
-async createReviewComments(
-  issues: DetectedIssue[],
-  suggestions: Map<string, FixSuggestion>
-) {
-  const pr = this.context.payload.pull_request;
-  if (!pr) return;
+    // --------------------------------------------------
+    // 💡 Inline Review Suggestions (Safe Version)
+    // --------------------------------------------------
+    async createReviewComments(
+        issues: DetectedIssue[],
+        suggestions: Map<string, FixSuggestion>
+    ) {
+        const pr = this.context.payload.pull_request;
+        if (!pr) return;
 
-  const { owner, repo } = this.context.repo;
+        const { owner, repo } = this.context.repo;
 
-  // Get PR files with patch info
-  const { data: files } = await this.octokit.pulls.listFiles({
-    owner,
-    repo,
-    pull_number: pr.number,
-  });
+        const filesResponse = await this.octokit.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: pr.number,
+        });
 
-  const comments: any[] = [];
+        const changedFiles = filesResponse.data.map(f => f.filename);
 
-  for (const issue of issues) {
-    if (issue.severity !== 'high') continue;
+        const comments: any[] = [];
 
-    const relativePath = this.toRelativePath(issue.file);
-    const file = files.find(f => f.filename === relativePath);
+        for (const issue of issues) {
+            if (issue.severity !== 'high') continue;
 
-    // 🔥 IMPORTANT: only comment if file has patch (meaning changed in PR)
-    if (!file || !file.patch) continue;
+            const relativePath = this.toRelativePath(issue.file);
 
-    const suggestion = suggestions.get(issue.text);
-    if (!suggestion) continue;
+            // ✅ Proper check
+            if (!changedFiles.includes(relativePath)) continue;
 
-    // 🔥 Validate that line exists in patch
-    const patchLines = file.patch.split('\n');
-    const lineExists = patchLines.some(line =>
-      line.includes(issue.text)
-    );
+            const suggestion = suggestions.get(issue.text);
+            if (!suggestion) continue;
 
-    if (!lineExists) continue;
-
-    comments.push({
-      path: relativePath,
-      line: issue.line,
-      side: "RIGHT",
-      body: `💡 Suggested Fix:
+            comments.push({
+                path: relativePath,
+                line: issue.line,
+                side: "RIGHT",
+                body: `💡 Suggested Fix:
 
 \`\`\`suggestion
 ${suggestion.suggestedCode.trim()}
 \`\`\`
 `
-    });
+            });
 
-    if (comments.length >= 3) break;
-  }
+            if (comments.length >= 3) break;
+        }
 
-  if (comments.length === 0) {
-    console.log('No valid inline suggestions to post');
-    return;
-  }
+        if (comments.length === 0) {
+            console.log('No inline comments to create');
+            return;
+        }
 
-  try {
-    await this.octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number: pr.number,
-      commit_id: pr.head.sha,
-      event: "COMMENT",
-      comments
-    });
+        await this.octokit.pulls.createReview({
+            owner,
+            repo,
+            pull_number: pr.number,
+            commit_id: pr.head.sha,
+            event: "COMMENT",
+            comments
+        });
 
-    console.log('✅ Inline review created');
-  } catch (err) {
-    console.log('Inline review failed:', err);
-  }
-}
-
-
-  // --------------------------------------------------
-  // 🤖 Auto Fix Mode (Commit + Push)
-  // --------------------------------------------------
-  async applyAutoFixes(
-    issues: DetectedIssue[],
-    suggestions: Map<string, FixSuggestion>
-  ) {
-    const workspace = process.env.GITHUB_WORKSPACE;
-    if (!workspace) return;
-
-    let changed = false;
-
-    for (const issue of issues) {
-      const suggestion = suggestions.get(issue.text);
-      if (!suggestion) continue;
-
-      const filePath = issue.file;
-      if (!fs.existsSync(filePath)) continue;
-
-      let content = fs.readFileSync(filePath, 'utf-8');
-
-      if (!content.includes(issue.text)) continue;
-
-      // 🔥 Replace ALL occurrences safely
-      content = content.replaceAll(issue.text, suggestion.suggestedCode);
-
-      fs.writeFileSync(filePath, content);
-      changed = true;
+        console.log('Inline review created successfully');
     }
 
-    if (!changed) {
-      console.log('No changes applied in auto-fix');
-      return;
+
+
+    // --------------------------------------------------
+    // 🤖 Auto Fix Mode (Commit + Push)
+    // --------------------------------------------------
+    async applyAutoFixes(
+        issues: DetectedIssue[],
+        suggestions: Map<string, FixSuggestion>
+    ) {
+        const workspace = process.env.GITHUB_WORKSPACE;
+        if (!workspace) return;
+
+        let changed = false;
+
+        for (const issue of issues) {
+            const suggestion = suggestions.get(issue.text);
+            if (!suggestion) continue;
+
+            const filePath = issue.file;
+            if (!fs.existsSync(filePath)) continue;
+
+            let content = fs.readFileSync(filePath, 'utf-8');
+
+            if (!content.includes(issue.text)) continue;
+
+            // 🔥 Replace ALL occurrences safely
+            content = content.replaceAll(issue.text, suggestion.suggestedCode);
+
+            fs.writeFileSync(filePath, content);
+            changed = true;
+        }
+
+        if (!changed) {
+            console.log('No changes applied in auto-fix');
+            return;
+        }
+
+        execSync('git config user.name "lingoguard-bot"');
+        execSync('git config user.email "bot@lingoguard.dev"');
+
+        execSync('git add .');
+
+        try {
+            execSync('git commit -m "🤖 LingoGuard Auto Fixes"');
+            execSync('git push');
+            console.log('Auto-fix committed and pushed');
+        } catch {
+            console.log('No commit created (possibly no changes)');
+        }
     }
 
-    execSync('git config user.name "lingoguard-bot"');
-    execSync('git config user.email "bot@lingoguard.dev"');
+    // --------------------------------------------------
+    // ✅ Create GitHub Check Run
+    // --------------------------------------------------
+    async createCheckRun(results: ScanResult): Promise<void> {
+        const { owner, repo } = this.context.repo;
+        const pullRequest = this.context.payload.pull_request;
+        if (!pullRequest) return;
 
-    execSync('git add .');
+        const headSha = pullRequest.head.sha;
 
-    try {
-      execSync('git commit -m "🤖 LingoGuard Auto Fixes"');
-      execSync('git push');
-      console.log('Auto-fix committed and pushed');
-    } catch {
-      console.log('No commit created (possibly no changes)');
+        const hasHighSeverity = results.hardcoded.some(
+            (i) => i.severity === 'high'
+        );
+
+        const conclusion: 'success' | 'failure' =
+            hasHighSeverity || results.health.score < 70
+                ? 'failure'
+                : 'success';
+
+        const annotations: CheckAnnotation[] = results.hardcoded
+            .filter((issue) => issue.line > 0)
+            .map((issue) => ({
+                path: this.toRelativePath(issue.file),
+                start_line: issue.line,
+                end_line: issue.line,
+                annotation_level:
+                    issue.severity === 'high'
+                        ? 'failure'
+                        : issue.severity === 'medium'
+                            ? 'warning'
+                            : 'notice',
+                message: `Hardcoded string "${issue.text}"`,
+            }));
+
+        await this.octokit.checks.create({
+            owner,
+            repo,
+            name: 'LingoGuard',
+            head_sha: headSha,
+            status: 'completed',
+            conclusion,
+            output: {
+                title: 'LingoGuard i18n Report',
+                summary: `Health Score: ${results.health.score}/100`,
+            },
+            annotations: annotations.slice(0, 50),
+        });
+
+        console.log('Created GitHub check run');
     }
-  }
 
-  // --------------------------------------------------
-  // ✅ Create GitHub Check Run
-  // --------------------------------------------------
-  async createCheckRun(results: ScanResult): Promise<void> {
-    const { owner, repo } = this.context.repo;
-    const pullRequest = this.context.payload.pull_request;
-    if (!pullRequest) return;
-
-    const headSha = pullRequest.head.sha;
-
-    const hasHighSeverity = results.hardcoded.some(
-      (i) => i.severity === 'high'
-    );
-
-    const conclusion: 'success' | 'failure' =
-      hasHighSeverity || results.health.score < 70
-        ? 'failure'
-        : 'success';
-
-    const annotations: CheckAnnotation[] = results.hardcoded
-      .filter((issue) => issue.line > 0)
-      .map((issue) => ({
-        path: this.toRelativePath(issue.file),
-        start_line: issue.line,
-        end_line: issue.line,
-        annotation_level:
-          issue.severity === 'high'
-            ? 'failure'
-            : issue.severity === 'medium'
-            ? 'warning'
-            : 'notice',
-        message: `Hardcoded string "${issue.text}"`,
-      }));
-
-    await this.octokit.checks.create({
-      owner,
-      repo,
-      name: 'LingoGuard',
-      head_sha: headSha,
-      status: 'completed',
-      conclusion,
-      output: {
-        title: 'LingoGuard i18n Report',
-        summary: `Health Score: ${results.health.score}/100`,
-      },
-      annotations: annotations.slice(0, 50),
-    });
-
-    console.log('Created GitHub check run');
-  }
-
-  // --------------------------------------------------
-  // 🔧 Convert absolute path → repo relative
-  // --------------------------------------------------
-  private toRelativePath(fullPath: string): string {
-    const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
-    return path.relative(workspace, fullPath).replace(/\\/g, '/');
-  }
+    // --------------------------------------------------
+    // 🔧 Convert absolute path → repo relative
+    // --------------------------------------------------
+    private toRelativePath(fullPath: string): string {
+        const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
+        return path.relative(workspace, fullPath).replace(/\\/g, '/');
+    }
 }
