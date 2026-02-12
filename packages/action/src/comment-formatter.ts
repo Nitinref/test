@@ -68,12 +68,15 @@ Total Issues: **${health.issuesFound}**
 \`${issue.text}\`
 
 ${suggestion ? `
-**Suggested Fix:**
-\`\`\`jsx
-${suggestion.suggestedCode}
+**💡 One-Click Fix (Apply directly in PR):**
+
+\`\`\`suggestion
+${suggestion.suggestedCode.trim()}
 \`\`\`
+
 **Translation Key:** \`${suggestion.suggestedKey}\`
 ` : ''}
+
 
 </details>`;
     });
