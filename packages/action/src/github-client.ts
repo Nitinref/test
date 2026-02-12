@@ -1,6 +1,6 @@
 import { Octokit } from '@octokit/rest';
 import * as github from '@actions/github';
-import { ScanResult } from '@lingoguard/cli';
+import { DetectedIssue, FixSuggestion, ScanResult } from '@lingoguard/cli';
 import * as path from 'path';
 
 type CheckAnnotation = {
@@ -20,7 +20,7 @@ export class GitHubClient {
   }
 
   // --------------------------------------------------
-  // 💬 Post or Update PR Comment
+  // 💬 Create or Update PR Comment
   // --------------------------------------------------
   async postComment(comment: string): Promise<void> {
     const { owner, repo } = this.context.repo;
@@ -60,17 +60,15 @@ export class GitHubClient {
   }
 
   // --------------------------------------------------
-  // ✅ Create GitHub Check Run (Inline Annotations)
+  // ✅ Create Check Run with Inline Annotations
   // --------------------------------------------------
   async createCheckRun(results: ScanResult): Promise<void> {
     const { owner, repo } = this.context.repo;
-    const pullRequest = this.context.payload.pull_request;
+    const pr = this.context.payload.pull_request;
+    if (!pr) return;
 
-    if (!pullRequest) return;
+    const headSha = pr.head.sha;
 
-    const headSha = pullRequest.head.sha;
-
-    // 🔥 Fail if high severity OR health score < 70
     const hasHighSeverity = results.hardcoded.some(
       (i) => i.severity === 'high'
     );
@@ -80,7 +78,6 @@ export class GitHubClient {
         ? 'failure'
         : 'success';
 
-    // Build safe annotations (max 50 allowed per request)
     const annotations: CheckAnnotation[] = results.hardcoded
       .filter((issue) => issue.line > 0)
       .map((issue) => ({
@@ -107,16 +104,69 @@ export class GitHubClient {
         title: 'LingoGuard i18n Report',
         summary: `Health Score: ${results.health.score}/100`,
       },
-      annotations: annotations.slice(0, 50),
+      annotations: annotations.slice(0, 50), // GitHub limit
     });
 
     console.log('Created GitHub check run');
   }
 
   // --------------------------------------------------
+  // 💡 Inline One-Click Suggestions
+  // --------------------------------------------------
+  async createReviewComments(
+    issues: DetectedIssue[],
+    suggestions: Map<string, FixSuggestion>
+  ): Promise<void> {
+    const pr = this.context.payload.pull_request;
+    if (!pr) return;
+
+    const { owner, repo } = this.context.repo;
+    const commitId = pr.head.sha;
+
+    const comments = issues
+      .filter((i) => i.severity === 'high')
+      .slice(0, 5)
+      .map((issue) => {
+        const suggestion = suggestions.get(issue.text);
+        const relativePath = this.toRelativePath(issue.file);
+
+        return {
+          path: relativePath,
+          line: issue.line,
+          side: 'RIGHT',
+          body: suggestion
+            ? `💡 Suggested Fix
+
+\`\`\`suggestion
+${suggestion.suggestedCode.trim()}
+\`\`\`
+`
+            : `🚨 Hardcoded string detected:
+
+\`${issue.text}\``,
+        };
+      });
+
+    if (comments.length === 0) return;
+
+    await this.octokit.pulls.createReview({
+      owner,
+      repo,
+      pull_number: pr.number,
+      commit_id: commitId,
+      event: 'COMMENT',
+      comments,
+    });
+
+    console.log('Created inline review suggestions');
+  }
+
+  // --------------------------------------------------
   // 🔧 Convert absolute path → repo relative
   // --------------------------------------------------
   private toRelativePath(fullPath: string): string {
-    return path.relative(process.cwd(), fullPath).replace(/\\/g, '/');
+    return path
+      .relative(process.env.GITHUB_WORKSPACE || process.cwd(), fullPath)
+      .replace(/\\/g, '/');
   }
 }

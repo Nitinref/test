@@ -5,6 +5,7 @@ import { CommentFormatter } from './comment-formatter';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
+import * as github from '@actions/github';
 
 core.info(`CWD: ${process.cwd()}`);
 core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
@@ -14,34 +15,36 @@ core.info(`process.cwd(): ${process.cwd()}`);
 
 
 async function getChangedFiles(): Promise<string[]> {
-  try {
-    const base = process.env.GITHUB_BASE_REF;
-    if (!base) return [];
+    try {
+        const base = github.context.payload.pull_request?.base.ref;
+        if (!base) return [];
 
-    const diff = execSync(
-      `git diff --name-only origin/${base}...HEAD`,
-      { encoding: 'utf-8' }
-    );
+        // Make sure base branch is fetched
+        execSync(`git fetch origin ${base}`, { stdio: 'ignore' });
 
-    const files = diff
-      .split('\n')
-      .filter(f =>
-        f.endsWith('.js') ||
-        f.endsWith('.ts') ||
-        f.endsWith('.jsx') ||
-        f.endsWith('.tsx')
-      )
-      .filter(Boolean);
+        const diff = execSync(
+            `git diff --name-only origin/${base}...HEAD`,
+            { encoding: 'utf-8' }
+        );
 
-    return files;
-  } catch {
-    return [];
-  }
+        return diff
+            .split('\n')
+            .filter(f =>
+                f.endsWith('.js') ||
+                f.endsWith('.ts') ||
+                f.endsWith('.jsx') ||
+                f.endsWith('.tsx')
+            )
+            .filter(Boolean);
+
+    } catch {
+        return [];
+    }
 }
 async function run(): Promise<void> {
     try {
         // ✅ Get inputs
-      const scanPath = core.getInput('scan-path') || process.env.GITHUB_WORKSPACE!;
+        const scanPath = core.getInput('scan-path') || process.env.GITHUB_WORKSPACE!;
 
 
         const ignorePatterns = core.getInput('ignore-patterns')?.split(',') || [];
@@ -58,18 +61,18 @@ async function run(): Promise<void> {
         });
 
         // ✅ Run scan
-      // 🔥 Detect changed files
-const changedFiles = await getChangedFiles();
+        // 🔥 Detect changed files
+        const changedFiles = await getChangedFiles();
 
-core.info(`Changed files detected: ${changedFiles.length}`);
+        core.info(`Changed files detected: ${changedFiles.length}`);
 
-const results = await scanner.scan({
-    scanPath,
-    ignorePatterns,
-    extensions: ['.js', '.jsx', '.ts', '.tsx'],
-    generateFixes: !!openAiApiKey,
-    filesOverride: changedFiles.length > 0 ? changedFiles : undefined,
-});
+        const results = await scanner.scan({
+            scanPath,
+            ignorePatterns,
+            extensions: ['.js', '.jsx', '.ts', '.tsx'],
+            generateFixes: !!openAiApiKey,
+            filesOverride: changedFiles.length > 0 ? changedFiles : undefined,
+        });
 
 
         core.info(`✓ Scan complete. Health Score: ${results.health.score}/100`);
@@ -89,24 +92,27 @@ const results = await scanner.scan({
         core.setOutput('issues-found', results.health.issuesFound);
         core.setOutput('results', JSON.stringify(results));
 
-        // ✅ Determine check status
-        let conclusion: 'success' | 'failure' | 'neutral' = 'success';
-        let summary = `Health Score: ${results.health.score}/100`;
+        // Create inline suggestions first
+        await githubClient.createReviewComments(
+            results.hardcoded,
+            results.suggestions
+        );
 
+        // Create check run
+        await githubClient.createCheckRun(results);
+
+        // Determine final failure state
         if (results.health.score < minHealthScore) {
-            conclusion = 'failure';
-            summary += ` (below minimum ${minHealthScore})`;
-            core.setFailed(summary);
+            core.setFailed(
+                `Health Score ${results.health.score} below minimum ${minHealthScore}`
+            );
         } else if (
             failOnHighSeverity &&
             results.hardcoded.some((i) => i.severity === 'high')
         ) {
-            conclusion = 'failure';
-            summary += ' - High severity issues found';
-            core.setFailed(summary);
+            core.setFailed('High severity issues found');
         }
 
-        await githubClient.createCheckRun(results);
 
 
     } catch (error) {
