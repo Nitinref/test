@@ -81,8 +81,10 @@ export class GitHubClient {
 
         const comments: any[] = [];
 
-        for (const issue of issues) {
-            if (issue.severity !== 'high') continue;
+       for (const issue of issues) {
+    // allow high + medium for inline testing
+    if (issue.severity !== 'high' && issue.severity !== 'medium') continue;
+
 
             const relativePath = this.toRelativePath(issue.file);
 

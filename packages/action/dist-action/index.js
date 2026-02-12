@@ -36543,7 +36543,8 @@ class GitHubClient {
         });
         const comments = [];
         for (const issue of issues) {
-            if (issue.severity !== 'high')
+            // allow high + medium for inline testing
+            if (issue.severity !== 'high' && issue.severity !== 'medium')
                 continue;
             const relativePath = this.toRelativePath(issue.file);
             const fileData = filesResponse.data.find(f => f.filename === relativePath);
