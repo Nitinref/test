@@ -14,3 +14,4 @@ const my  = "hey"
 const hey= "fe"
 
 const hey75= "feefw"
+const newInlineTest = "INLINE_SUGGESTION_TEST_999";
