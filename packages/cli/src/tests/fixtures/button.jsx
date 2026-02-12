@@ -1,6 +1,6 @@
 export default function Button() {
   return (
-    <button>Click Me yrr55</button>
+    <button>t("button.click_me_yrr55")</button>
   );
 }
 const test = "Hello World"
