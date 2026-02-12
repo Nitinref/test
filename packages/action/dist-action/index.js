@@ -36499,7 +36499,8 @@ class GitHubClient {
     // --------------------------------------------------
     async postComment(comment) {
         const { owner, repo } = this.context.repo;
-        const prNumber = this.context.payload.pull_request?.number;
+        const prNumber = this.context.payload.pull_request?.number ||
+            this.context.payload.issue?.number;
         if (!prNumber) {
             throw new Error('Not running inside a pull request context');
         }
@@ -36640,10 +36641,11 @@ ${suggestion.suggestedCode.trim()}
     // ✅ Create GitHub Check Run
     // --------------------------------------------------
     async createCheckRun(results) {
-        const { owner, repo } = this.context.repo;
-        const pullRequest = this.context.payload.pull_request;
-        if (!pullRequest)
+        if (this.context.eventName !== 'pull_request') {
             return;
+        }
+        const pullRequest = this.context.payload.pull_request;
+        const { owner, repo } = this.context.repo;
         const headSha = pullRequest.head.sha;
         const hasHighSeverity = results.hardcoded.some((i) => i.severity === 'high');
         const conclusion = hasHighSeverity || results.health.score < 70
@@ -36833,14 +36835,12 @@ async function run() {
         core.setOutput('health-score', results.health.score);
         core.setOutput('issues-found', results.health.issuesFound);
         core.setOutput('results', JSON.stringify(results));
-        if (!autoFix) {
-            if (results.health.score < minHealthScore) {
-                core.setFailed(`Health Score ${results.health.score} below minimum ${minHealthScore}`);
-            }
-            else if (failOnHighSeverity &&
-                results.hardcoded.some(i => i.severity === 'high')) {
-                core.setFailed('High severity issues found');
-            }
+        if (results.health.score < minHealthScore) {
+            core.setFailed(`Health Score ${results.health.score} below minimum ${minHealthScore}`);
+        }
+        else if (failOnHighSeverity &&
+            results.hardcoded.some(i => i.severity === 'high')) {
+            core.setFailed('High severity issues found');
         }
     }
     catch (error) {
