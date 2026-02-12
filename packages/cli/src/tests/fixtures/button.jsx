@@ -12,3 +12,5 @@ const finalChec5k = "Now It Should Work";
 const nitin  = "name";
 const my  = "hey"
 const hey= "fe"
+
+const hey75= "feefw"
