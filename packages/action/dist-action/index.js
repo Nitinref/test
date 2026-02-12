@@ -36735,19 +36735,10 @@ const github_client_1 = __nccwpck_require__(5328);
 const comment_formatter_1 = __nccwpck_require__(3079);
 const child_process_1 = __nccwpck_require__(5317);
 const github = __importStar(__nccwpck_require__(5251));
-// ==========================================
-// 🔍 Detect Changed Files (PR-safe version)
-// ==========================================
-async function getChangedFiles() {
+async function getChangedFiles(baseRef) {
     try {
-        const base = process.env.PR_BASE_REF ||
-            github.context.payload.pull_request?.base.ref;
-        if (!base) {
-            core.info('No base branch detected.');
-            return [];
-        }
-        (0, child_process_1.execSync)(`git fetch origin ${base}`, { stdio: 'ignore' });
-        const diff = (0, child_process_1.execSync)(`git diff --name-only origin/${base}...HEAD`, { encoding: 'utf-8' });
+        (0, child_process_1.execSync)(`git fetch origin ${baseRef}`, { stdio: 'ignore' });
+        const diff = (0, child_process_1.execSync)(`git diff --name-only origin/${baseRef}...HEAD`, { encoding: 'utf-8' });
         return diff
             .split('\n')
             .filter(f => f.endsWith('.js') ||
@@ -36761,36 +36752,31 @@ async function getChangedFiles() {
         return [];
     }
 }
-// ==========================================
-// 🚀 Main Runner
-// ==========================================
 async function run() {
     try {
         const context = github.context;
-        // ==============================
-        // 🔹 Inputs
-        // ==============================
-        let autoFix = core.getInput('auto-fix') === 'true';
         const githubToken = core.getInput('github-token', { required: true });
         const openAiApiKey = core.getInput('openai-api-key');
         const scanPath = core.getInput('scan-path') || process.env.GITHUB_WORKSPACE;
         const ignorePatterns = core.getInput('ignore-patterns')?.split(',') || [];
         const minHealthScore = parseInt(core.getInput('min-health-score') || '70');
         const failOnHighSeverity = core.getInput('fail-on-high-severity') === 'true';
-        // ======================================
-        // 🔥 Slash Command Support (REAL FIX)
-        // ======================================
+        let autoFix = core.getInput('auto-fix') === 'true';
+        let baseRef;
+        let headRef;
+        // ==========================================
+        // 🔥 HANDLE SLASH COMMAND
+        // ==========================================
         if (context.eventName === 'issue_comment') {
             const body = context.payload.comment?.body;
             if (!body?.includes('/lingoguard fix')) {
-                core.info('Not LingoGuard command. Skipping.');
+                core.info('Not a LingoGuard command. Skipping.');
                 return;
             }
             if (!context.payload.issue?.pull_request) {
                 core.info('Comment is not on a PR. Skipping.');
                 return;
             }
-            core.info('Slash command detected.');
             autoFix = true;
             const octokit = github.getOctokit(githubToken);
             const { owner, repo } = context.repo;
@@ -36800,27 +36786,28 @@ async function run() {
                 repo,
                 pull_number,
             });
-            process.env.PR_BASE_REF = pr.data.base.ref;
-            // 🔥 CRITICAL FIX
-            (0, child_process_1.execSync)(`git fetch origin ${pr.data.head.ref}`, { stdio: 'inherit' });
-            (0, child_process_1.execSync)(`git checkout -B ${pr.data.head.ref} origin/${pr.data.head.ref}`, { stdio: 'inherit' });
-            core.info(`Checked out PR branch: ${pr.data.head.ref}`);
+            baseRef = pr.data.base.ref;
+            headRef = pr.data.head.ref;
+            core.info(`Checking out PR branch: ${headRef}`);
+            (0, child_process_1.execSync)(`git fetch origin ${headRef}`, { stdio: 'inherit' });
+            (0, child_process_1.execSync)(`git checkout ${headRef}`, { stdio: 'inherit' });
+        }
+        // ==========================================
+        // 🔥 NORMAL PR EVENT
+        // ==========================================
+        if (context.payload.pull_request) {
+            baseRef = context.payload.pull_request.base.ref;
+        }
+        if (!baseRef) {
+            core.warning('No base branch detected.');
+            return;
         }
         core.info('🛡️ Starting LingoGuard scan...');
-        // ==============================
-        // 🔹 Initialize Scanner
-        // ==============================
         const scanner = new cli_1.LingoGuard({
             openAiKey: openAiApiKey || process.env.OPENAI_API_KEY,
         });
-        // ==============================
-        // 🔹 Detect Changed Files
-        // ==============================
-        const changedFiles = await getChangedFiles();
+        const changedFiles = await getChangedFiles(baseRef);
         core.info(`Changed files detected: ${changedFiles.length}`);
-        // ==============================
-        // 🔹 Run Scan
-        // ==============================
         const results = await scanner.scan({
             scanPath,
             ignorePatterns,
@@ -36830,38 +36817,22 @@ async function run() {
         });
         core.info(`✓ Scan complete. Health Score: ${results.health.score}/100`);
         const githubClient = new github_client_1.GitHubClient(githubToken);
-        // ==============================
-        // 🔹 PR Comment
-        // ==============================
         const formatter = new comment_formatter_1.CommentFormatter();
         const comment = formatter.format(results);
         await githubClient.postComment(comment);
-        core.info('✓ Posted results to PR');
-        // ==============================
-        // 🔹 Inline Suggestions
-        // ==============================
         await githubClient.createReviewComments(results.hardcoded, results.suggestions);
-        // ==============================
-        // 🔹 Auto Fix Mode
-        // ==============================
+        // ==========================================
+        // 🤖 AUTO FIX ENGINE
+        // ==========================================
         if (autoFix && results.suggestions.size > 0) {
             core.info('🤖 Auto-fix enabled. Applying fixes...');
             await githubClient.applyAutoFixes(results.hardcoded, results.suggestions);
             core.info('✅ Auto-fixes committed and pushed.');
         }
-        // ==============================
-        // 🔹 Create Check Run
-        // ==============================
         await githubClient.createCheckRun(results);
-        // ==============================
-        // 🔹 Outputs
-        // ==============================
         core.setOutput('health-score', results.health.score);
         core.setOutput('issues-found', results.health.issuesFound);
         core.setOutput('results', JSON.stringify(results));
-        // ==============================
-        // 🔹 Failure Logic
-        // ==============================
         if (results.health.score < minHealthScore) {
             core.setFailed(`Health Score ${results.health.score} below minimum ${minHealthScore}`);
         }
