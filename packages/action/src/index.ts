@@ -71,40 +71,42 @@ async function run(): Promise<void> {
     // ======================================
     // 🔥 Slash Command Support (REAL FIX)
     // ======================================
-    if (context.eventName === 'issue_comment') {
+   if (context.eventName === 'issue_comment') {
 
-      const body = context.payload.comment?.body;
+  const body = context.payload.comment?.body;
 
-      if (!body?.includes('/lingoguard fix')) {
-        core.info('Not LingoGuard command. Skipping.');
-        return;
-      }
+  if (!body?.includes('/lingoguard fix')) {
+    core.info('Not LingoGuard command. Skipping.');
+    return;
+  }
 
-      if (!context.payload.issue?.pull_request) {
-        core.info('Comment is not on a PR. Skipping.');
-        return;
-      }
+  if (!context.payload.issue?.pull_request) {
+    core.info('Comment is not on a PR. Skipping.');
+    return;
+  }
 
-      core.info('Slash command detected.');
+  core.info('Slash command detected.');
+  autoFix = true;
 
-      autoFix = true;
+  const octokit = github.getOctokit(githubToken);
+  const { owner, repo } = context.repo;
+  const pull_number = context.payload.issue.number;
 
-      // 🔥 Load PR data manually
-      const octokit = github.getOctokit(githubToken);
+  const pr = await octokit.rest.pulls.get({
+    owner,
+    repo,
+    pull_number,
+  });
 
-      const { owner, repo } = context.repo;
-      const pull_number = context.payload.issue.number;
+  process.env.PR_BASE_REF = pr.data.base.ref;
 
-      const pr = await octokit.rest.pulls.get({
-        owner,
-        repo,
-        pull_number,
-      });
+  // 🔥 CRITICAL FIX
+ execSync(`git fetch origin ${pr.data.head.ref}`, { stdio: 'inherit' });
+  execSync(`git checkout -B ${pr.data.head.ref} origin/${pr.data.head.ref}`, { stdio: 'inherit' });
 
-      process.env.PR_BASE_REF = pr.data.base.ref;
+  core.info(`Checked out PR branch: ${pr.data.head.ref}`);
+}
 
-      core.info(`Loaded PR base branch: ${pr.data.base.ref}`);
-    }
 
     core.info('🛡️ Starting LingoGuard scan...');
 

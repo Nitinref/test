@@ -36792,7 +36792,6 @@ async function run() {
             }
             core.info('Slash command detected.');
             autoFix = true;
-            // 🔥 Load PR data manually
             const octokit = github.getOctokit(githubToken);
             const { owner, repo } = context.repo;
             const pull_number = context.payload.issue.number;
@@ -36802,7 +36801,10 @@ async function run() {
                 pull_number,
             });
             process.env.PR_BASE_REF = pr.data.base.ref;
-            core.info(`Loaded PR base branch: ${pr.data.base.ref}`);
+            // 🔥 CRITICAL FIX
+            (0, child_process_1.execSync)(`git fetch origin ${pr.data.head.ref}`, { stdio: 'inherit' });
+            (0, child_process_1.execSync)(`git checkout -B ${pr.data.head.ref} origin/${pr.data.head.ref}`, { stdio: 'inherit' });
+            core.info(`Checked out PR branch: ${pr.data.head.ref}`);
         }
         core.info('🛡️ Starting LingoGuard scan...');
         // ==============================
