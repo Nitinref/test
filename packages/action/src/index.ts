@@ -2,28 +2,23 @@ import * as core from '@actions/core';
 import { LingoGuard } from '@lingoguard/cli';
 import { GitHubClient } from './github-client';
 import { CommentFormatter } from './comment-formatter';
-import * as fs from 'fs';
-import * as path from 'path';
 import { execSync } from 'child_process';
-
-core.info(`CWD: ${process.cwd()}`);
-core.info(`Files in CWD: ${fs.readdirSync(process.cwd()).join(', ')}`);
-core.info(`GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE}`);
-core.info(`process.cwd(): ${process.cwd()}`);
-
-
+import * as github from '@actions/github';
 
 async function getChangedFiles(): Promise<string[]> {
   try {
-    const base = process.env.GITHUB_BASE_REF;
+    const base = github.context.payload.pull_request?.base.ref;
     if (!base) return [];
+
+    // Ensure base branch is fetched
+    execSync(`git fetch origin ${base}`, { stdio: 'ignore' });
 
     const diff = execSync(
       `git diff --name-only origin/${base}...HEAD`,
       { encoding: 'utf-8' }
     );
 
-    const files = diff
+    return diff
       .split('\n')
       .filter(f =>
         f.endsWith('.js') ||
@@ -33,85 +28,130 @@ async function getChangedFiles(): Promise<string[]> {
       )
       .filter(Boolean);
 
-    return files;
-  } catch {
+  } catch (error) {
+    core.warning('Could not determine changed files.');
     return [];
   }
 }
+
 async function run(): Promise<void> {
-    try {
-        // ✅ Get inputs
-      const scanPath = core.getInput('scan-path') || process.env.GITHUB_WORKSPACE!;
+  try {
+    // ==============================
+    // 🔹 Inputs
+    // ==============================
+    const scanPath =
+      core.getInput('scan-path') || process.env.GITHUB_WORKSPACE!;
 
+    const ignorePatterns =
+      core.getInput('ignore-patterns')?.split(',') || [];
 
-        const ignorePatterns = core.getInput('ignore-patterns')?.split(',') || [];
-        const githubToken = core.getInput('github-token', { required: true });
-        const openAiApiKey = core.getInput('openai-api-key'); // 🔥 updated
-        const minHealthScore = parseInt(core.getInput('min-health-score') || '70');
-        const failOnHighSeverity = core.getInput('fail-on-high-severity') === 'true';
+    const githubToken = core.getInput('github-token', { required: true });
 
-        core.info('🛡️  Starting LingoGuard scan...');
+    const openAiApiKey = core.getInput('openai-api-key');
 
-        // ✅ Initialize scanner with OpenAI
-        const scanner = new LingoGuard({
-            openAiKey: openAiApiKey || process.env.OPENAI_API_KEY,
-        });
+    const minHealthScore = parseInt(
+      core.getInput('min-health-score') || '70'
+    );
 
-        // ✅ Run scan
-      // 🔥 Detect changed files
-const changedFiles = await getChangedFiles();
+    const failOnHighSeverity =
+      core.getInput('fail-on-high-severity') === 'true';
 
-core.info(`Changed files detected: ${changedFiles.length}`);
+    const autoFix =
+      core.getInput('auto-fix') === 'true';
 
-const results = await scanner.scan({
-    scanPath,
-    ignorePatterns,
-    extensions: ['.js', '.jsx', '.ts', '.tsx'],
-    generateFixes: !!openAiApiKey,
-    filesOverride: changedFiles.length > 0 ? changedFiles : undefined,
-});
+    core.info('🛡️ Starting LingoGuard scan...');
 
+    // ==============================
+    // 🔹 Initialize Scanner
+    // ==============================
+    const scanner = new LingoGuard({
+      openAiKey: openAiApiKey || process.env.OPENAI_API_KEY,
+    });
 
-        core.info(`✓ Scan complete. Health Score: ${results.health.score}/100`);
+    // ==============================
+    // 🔹 Detect Changed Files
+    // ==============================
+    const changedFiles = await getChangedFiles();
+    core.info(`Changed files detected: ${changedFiles.length}`);
 
-        // ✅ Format PR comment
-        const formatter = new CommentFormatter();
-        const comment = formatter.format(results);
+    // ==============================
+    // 🔹 Run Scan
+    // ==============================
+    const results = await scanner.scan({
+      scanPath,
+      ignorePatterns,
+      extensions: ['.js', '.jsx', '.ts', '.tsx'],
+      generateFixes: !!openAiApiKey,
+      filesOverride:
+        changedFiles.length > 0 ? changedFiles : undefined,
+    });
 
-        // ✅ Post to GitHub PR
-        const githubClient = new GitHubClient(githubToken);
-        await githubClient.postComment(comment);
+    core.info(
+      `✓ Scan complete. Health Score: ${results.health.score}/100`
+    );
 
-        core.info('✓ Posted results to PR');
+    // ==============================
+    // 🔹 Format PR Comment
+    // ==============================
+    const formatter = new CommentFormatter();
+    const comment = formatter.format(results);
 
-        // ✅ Set outputs
-        core.setOutput('health-score', results.health.score);
-        core.setOutput('issues-found', results.health.issuesFound);
-        core.setOutput('results', JSON.stringify(results));
+    const githubClient = new GitHubClient(githubToken);
 
-        // ✅ Determine check status
-        let conclusion: 'success' | 'failure' | 'neutral' = 'success';
-        let summary = `Health Score: ${results.health.score}/100`;
+    await githubClient.postComment(comment);
+    core.info('✓ Posted results to PR');
 
-        if (results.health.score < minHealthScore) {
-            conclusion = 'failure';
-            summary += ` (below minimum ${minHealthScore})`;
-            core.setFailed(summary);
-        } else if (
-            failOnHighSeverity &&
-            results.hardcoded.some((i) => i.severity === 'high')
-        ) {
-            conclusion = 'failure';
-            summary += ' - High severity issues found';
-            core.setFailed(summary);
-        }
+    // ==============================
+    // 🔹 Inline Suggestions
+    // ==============================
+    await githubClient.createReviewComments(
+      results.hardcoded,
+      results.suggestions
+    );
 
-        await githubClient.createCheckRun(results);
-
-
-    } catch (error) {
-        core.setFailed(`Action failed: ${(error as Error).message}`);
+    // ==============================
+    // 🔹 Auto Fix Mode
+    // ==============================
+    if (autoFix && results.suggestions.size > 0) {
+      core.info('🤖 Auto-fix enabled. Applying fixes...');
+      await githubClient.applyAutoFixes(
+        results.hardcoded,
+        results.suggestions
+      );
+      core.info('✅ Auto-fixes committed and pushed.');
     }
+
+    // ==============================
+    // 🔹 Create Check Run
+    // ==============================
+    await githubClient.createCheckRun(results);
+
+    // ==============================
+    // 🔹 Outputs
+    // ==============================
+    core.setOutput('health-score', results.health.score);
+    core.setOutput('issues-found', results.health.issuesFound);
+    core.setOutput('results', JSON.stringify(results));
+
+    // ==============================
+    // 🔹 Final Failure Logic
+    // ==============================
+    if (results.health.score < minHealthScore) {
+      core.setFailed(
+        `Health Score ${results.health.score} below minimum ${minHealthScore}`
+      );
+    } else if (
+      failOnHighSeverity &&
+      results.hardcoded.some(i => i.severity === 'high')
+    ) {
+      core.setFailed('High severity issues found');
+    }
+
+  } catch (error) {
+    core.setFailed(
+      `Action failed: ${(error as Error).message}`
+    );
+  }
 }
 
 run();

@@ -35,6 +35,12 @@ inputs:
     required: false
     default: 'true'
 
+  auto-fix:
+    description: 'Automatically commit AI fixes'
+    required: false
+    default: 'false'
+
+
 outputs:
   health-score:
     description: 'Computed health score (0-100)'
