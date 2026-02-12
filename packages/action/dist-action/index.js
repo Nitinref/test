@@ -36536,55 +36536,60 @@ class GitHubClient {
         if (!pr)
             return;
         const { owner, repo } = this.context.repo;
-        const changedFiles = await this.octokit.pulls.listFiles({
+        // Get PR files with patch info
+        const { data: files } = await this.octokit.pulls.listFiles({
             owner,
             repo,
             pull_number: pr.number,
         });
-        const changedFileMap = new Map(changedFiles.data.map((f) => [f.filename, f]));
         const comments = [];
         for (const issue of issues) {
             if (issue.severity !== 'high')
                 continue;
             const relativePath = this.toRelativePath(issue.file);
-            const fileData = changedFileMap.get(relativePath);
-            // 🔥 Only allow files actually modified in PR
-            if (!fileData)
-                continue;
-            if (fileData.status !== 'modified' && fileData.status !== 'added')
+            const file = files.find(f => f.filename === relativePath);
+            // 🔥 IMPORTANT: only comment if file has patch (meaning changed in PR)
+            if (!file || !file.patch)
                 continue;
             const suggestion = suggestions.get(issue.text);
             if (!suggestion)
                 continue;
+            // 🔥 Validate that line exists in patch
+            const patchLines = file.patch.split('\n');
+            const lineExists = patchLines.some(line => line.includes(issue.text));
+            if (!lineExists)
+                continue;
             comments.push({
                 path: relativePath,
                 line: issue.line,
-                side: 'RIGHT',
+                side: "RIGHT",
                 body: `💡 Suggested Fix:
 
 \`\`\`suggestion
 ${suggestion.suggestedCode.trim()}
 \`\`\`
-`,
+`
             });
             if (comments.length >= 3)
                 break;
         }
-        if (comments.length === 0)
+        if (comments.length === 0) {
+            console.log('No valid inline suggestions to post');
             return;
+        }
         try {
             await this.octokit.pulls.createReview({
                 owner,
                 repo,
                 pull_number: pr.number,
                 commit_id: pr.head.sha,
-                event: 'COMMENT',
-                comments,
+                event: "COMMENT",
+                comments
             });
-            console.log('Inline review created');
+            console.log('✅ Inline review created');
         }
         catch (err) {
-            console.log('Inline review failed (line not in diff), skipping.');
+            console.log('Inline review failed:', err);
         }
     }
     // --------------------------------------------------
