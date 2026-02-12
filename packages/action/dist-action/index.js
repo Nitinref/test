@@ -36529,51 +36529,62 @@ class GitHubClient {
         }
     }
     // --------------------------------------------------
-    // 💡 Inline Review Suggestions (GitHub Suggestion Block)
+    // 💡 Inline Review Suggestions (Safe Version)
     // --------------------------------------------------
     async createReviewComments(issues, suggestions) {
         const pr = this.context.payload.pull_request;
         if (!pr)
             return;
-        const headSha = pr.head.sha;
+        const { owner, repo } = this.context.repo;
+        const changedFiles = await this.octokit.pulls.listFiles({
+            owner,
+            repo,
+            pull_number: pr.number,
+        });
+        const changedFileMap = new Map(changedFiles.data.map((f) => [f.filename, f]));
         const comments = [];
         for (const issue of issues) {
             if (issue.severity !== 'high')
                 continue;
+            const relativePath = this.toRelativePath(issue.file);
+            const fileData = changedFileMap.get(relativePath);
+            // 🔥 Only allow files actually modified in PR
+            if (!fileData)
+                continue;
+            if (fileData.status !== 'modified' && fileData.status !== 'added')
+                continue;
             const suggestion = suggestions.get(issue.text);
             if (!suggestion)
                 continue;
-            // ⚠️ Only comment if file exists inside workspace
-            const relativePath = this.toRelativePath(issue.file);
             comments.push({
                 path: relativePath,
                 line: issue.line,
-                side: "RIGHT",
+                side: 'RIGHT',
                 body: `💡 Suggested Fix:
 
 \`\`\`suggestion
 ${suggestion.suggestedCode.trim()}
 \`\`\`
-`
+`,
             });
-            if (comments.length >= 5)
+            if (comments.length >= 3)
                 break;
         }
         if (comments.length === 0)
             return;
         try {
             await this.octokit.pulls.createReview({
-                owner: this.context.repo.owner,
-                repo: this.context.repo.repo,
+                owner,
+                repo,
                 pull_number: pr.number,
-                commit_id: headSha,
-                event: "COMMENT",
-                comments
+                commit_id: pr.head.sha,
+                event: 'COMMENT',
+                comments,
             });
-            console.log('Created inline suggestion review comments');
+            console.log('Inline review created');
         }
         catch (err) {
-            console.log('Inline review failed, skipping.');
+            console.log('Inline review failed (line not in diff), skipping.');
         }
     }
     // --------------------------------------------------
@@ -36594,7 +36605,8 @@ ${suggestion.suggestedCode.trim()}
             let content = fs.readFileSync(filePath, 'utf-8');
             if (!content.includes(issue.text))
                 continue;
-            content = content.replace(issue.text, suggestion.suggestedCode);
+            // 🔥 Replace ALL occurrences safely
+            content = content.replaceAll(issue.text, suggestion.suggestedCode);
             fs.writeFileSync(filePath, content);
             changed = true;
         }
