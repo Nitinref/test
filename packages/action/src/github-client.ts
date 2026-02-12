@@ -103,12 +103,19 @@ export class GitHubClient {
             for (let i = 0; i < patchLines.length; i++) {
                 const line = patchLines[i];
 
-                // Only match added lines
-                if (line.startsWith('+') && line.includes(issue.text)) {
-                    position = i + 1; // GitHub uses 1-based index
+                // Only added lines
+                if (!line.startsWith('+')) continue;
+
+                // Remove "+" and trim
+                const cleanLine = line.substring(1).trim();
+
+                // Relaxed match
+                if (cleanLine.includes(issue.text.trim())) {
+                    position = i + 1;
                     break;
                 }
             }
+
 
             if (!position) continue;
 
