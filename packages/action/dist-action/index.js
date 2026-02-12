@@ -36535,15 +36535,18 @@ class GitHubClient {
         const pr = this.context.payload.pull_request;
         if (!pr)
             return;
-        const comments = issues
-            .filter(i => i.severity === 'high')
-            .slice(0, 5)
-            .map(issue => {
+        const headSha = pr.head.sha;
+        const comments = [];
+        for (const issue of issues) {
+            if (issue.severity !== 'high')
+                continue;
             const suggestion = suggestions.get(issue.text);
             if (!suggestion)
-                return null;
-            return {
-                path: this.toRelativePath(issue.file),
+                continue;
+            // ⚠️ Only comment if file exists inside workspace
+            const relativePath = this.toRelativePath(issue.file);
+            comments.push({
+                path: relativePath,
                 line: issue.line,
                 side: "RIGHT",
                 body: `💡 Suggested Fix:
@@ -36552,19 +36555,26 @@ class GitHubClient {
 ${suggestion.suggestedCode.trim()}
 \`\`\`
 `
-            };
-        })
-            .filter(Boolean);
+            });
+            if (comments.length >= 5)
+                break;
+        }
         if (comments.length === 0)
             return;
-        await this.octokit.pulls.createReview({
-            owner: this.context.repo.owner,
-            repo: this.context.repo.repo,
-            pull_number: pr.number,
-            event: "COMMENT",
-            comments
-        });
-        console.log('Created inline suggestion review comments');
+        try {
+            await this.octokit.pulls.createReview({
+                owner: this.context.repo.owner,
+                repo: this.context.repo.repo,
+                pull_number: pr.number,
+                commit_id: headSha,
+                event: "COMMENT",
+                comments
+            });
+            console.log('Created inline suggestion review comments');
+        }
+        catch (err) {
+            console.log('Inline review failed, skipping.');
+        }
     }
     // --------------------------------------------------
     // 🤖 Auto Fix Mode (Commit + Push)
