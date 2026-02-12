@@ -8,7 +8,7 @@ on:
     types: [created]
 
 permissions:
-  contents: write          # 🔥 Required for auto-fix commits
+  contents: write
   pull-requests: write
   checks: write
 
@@ -16,39 +16,16 @@ jobs:
   lingoguard:
     runs-on: ubuntu-latest
 
-    # 🔥 Only run slash command workflow if it's on a PR
     if: |
       github.event_name == 'pull_request' ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request)
+      (github.event_name == 'issue_comment' &&
+       contains(github.event.comment.body, '/lingoguard fix'))
 
     steps:
-
-      # =========================================
-      # 🔹 Checkout PR branch correctly
-      # =========================================
-      - name: Checkout PR branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.event.issue.pull_request.head.sha }}
 
-      # =========================================
-      # 🔹 Setup Node (important for local action)
-      # =========================================
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      # =========================================
-      # 🔹 Install dependencies (monorepo safe)
-      # =========================================
-      - name: Install dependencies
-        run: npm install
-
-      # =========================================
-      # 🔹 Run LingoGuard Action
-      # =========================================
       - name: Run LingoGuard
         uses: ./packages/action
         with:
