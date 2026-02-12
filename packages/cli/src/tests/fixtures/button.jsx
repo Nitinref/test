@@ -9,3 +9,4 @@ const test2 = "My name is nitin1"
 const finalCheck = "Now It Should Work";
 const hackathonWin = "This will win hackathon";
 const finalChec5k = "Now It Should Work";
+const nitin  = "name";
