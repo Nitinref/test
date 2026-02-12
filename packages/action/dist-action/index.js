@@ -36735,11 +36735,17 @@ const github_client_1 = __nccwpck_require__(5328);
 const comment_formatter_1 = __nccwpck_require__(3079);
 const child_process_1 = __nccwpck_require__(5317);
 const github = __importStar(__nccwpck_require__(5251));
+// ==========================================
+// 🔍 Detect Changed Files (PR-safe version)
+// ==========================================
 async function getChangedFiles() {
     try {
-        const base = github.context.payload.pull_request?.base.ref;
-        if (!base)
+        const base = process.env.PR_BASE_REF ||
+            github.context.payload.pull_request?.base.ref;
+        if (!base) {
+            core.info('No base branch detected.');
             return [];
+        }
         (0, child_process_1.execSync)(`git fetch origin ${base}`, { stdio: 'ignore' });
         const diff = (0, child_process_1.execSync)(`git diff --name-only origin/${base}...HEAD`, { encoding: 'utf-8' });
         return diff
@@ -36755,6 +36761,9 @@ async function getChangedFiles() {
         return [];
     }
 }
+// ==========================================
+// 🚀 Main Runner
+// ==========================================
 async function run() {
     try {
         const context = github.context;
@@ -36762,26 +36771,39 @@ async function run() {
         // 🔹 Inputs
         // ==============================
         let autoFix = core.getInput('auto-fix') === 'true';
-        // 🔥 Slash command support
+        const githubToken = core.getInput('github-token', { required: true });
+        const openAiApiKey = core.getInput('openai-api-key');
+        const scanPath = core.getInput('scan-path') || process.env.GITHUB_WORKSPACE;
+        const ignorePatterns = core.getInput('ignore-patterns')?.split(',') || [];
+        const minHealthScore = parseInt(core.getInput('min-health-score') || '70');
+        const failOnHighSeverity = core.getInput('fail-on-high-severity') === 'true';
+        // ======================================
+        // 🔥 Slash Command Support (REAL FIX)
+        // ======================================
         if (context.eventName === 'issue_comment') {
-            const commentBody = context.payload.comment?.body;
-            if (!commentBody?.includes('/lingoguard fix')) {
-                core.info('Not a LingoGuard slash command. Skipping.');
+            const body = context.payload.comment?.body;
+            if (!body?.includes('/lingoguard fix')) {
+                core.info('Not LingoGuard command. Skipping.');
                 return;
             }
             if (!context.payload.issue?.pull_request) {
                 core.info('Comment is not on a PR. Skipping.');
                 return;
             }
-            core.info('Slash command detected. Enabling auto-fix mode.');
+            core.info('Slash command detected.');
             autoFix = true;
+            // 🔥 Load PR data manually
+            const octokit = github.getOctokit(githubToken);
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.issue.number;
+            const pr = await octokit.rest.pulls.get({
+                owner,
+                repo,
+                pull_number,
+            });
+            process.env.PR_BASE_REF = pr.data.base.ref;
+            core.info(`Loaded PR base branch: ${pr.data.base.ref}`);
         }
-        const scanPath = core.getInput('scan-path') || process.env.GITHUB_WORKSPACE;
-        const ignorePatterns = core.getInput('ignore-patterns')?.split(',') || [];
-        const githubToken = core.getInput('github-token', { required: true });
-        const openAiApiKey = core.getInput('openai-api-key');
-        const minHealthScore = parseInt(core.getInput('min-health-score') || '70');
-        const failOnHighSeverity = core.getInput('fail-on-high-severity') === 'true';
         core.info('🛡️ Starting LingoGuard scan...');
         // ==============================
         // 🔹 Initialize Scanner
