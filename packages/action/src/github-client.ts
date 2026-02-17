@@ -26,11 +26,14 @@ export class GitHubClient {
     // --------------------------------------------------
     async postComment(comment: string): Promise<void> {
         const { owner, repo } = this.context.repo;
-        const prNumber = this.context.payload.pull_request?.number;
+        const prNumber =
+            this.context.payload.pull_request?.number ||
+            this.context.payload.issue?.number;
 
         if (!prNumber) {
             throw new Error('Not running inside a pull request context');
         }
+
 
         const comments = await this.octokit.issues.listComments({
             owner,
@@ -81,9 +84,9 @@ export class GitHubClient {
 
         const comments: any[] = [];
 
-       for (const issue of issues) {
-    // allow high + medium for inline testing
-    if (issue.severity !== 'high' && issue.severity !== 'medium') continue;
+        for (const issue of issues) {
+            // allow high + medium for inline testing
+            if (issue.severity !== 'high' && issue.severity !== 'medium') continue;
 
 
             const relativePath = this.toRelativePath(issue.file);
@@ -207,12 +210,16 @@ ${suggestion.suggestedCode.trim()}
     // --------------------------------------------------
     // ✅ Create GitHub Check Run
     // --------------------------------------------------
-    async createCheckRun(results: ScanResult): Promise<void> {
-        const { owner, repo } = this.context.repo;
-        const pullRequest = this.context.payload.pull_request;
-        if (!pullRequest) return;
+ async createCheckRun(results: ScanResult): Promise<void> {
+  if (this.context.eventName !== 'pull_request') {
+    return;
+  }
 
-        const headSha = pullRequest.head.sha;
+  const pullRequest = this.context.payload.pull_request!;
+  const { owner, repo } = this.context.repo;
+
+  const headSha = pullRequest.head.sha;
+
 
         const hasHighSeverity = results.hardcoded.some(
             (i) => i.severity === 'high'

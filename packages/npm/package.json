@@ -1,0 +1,14 @@
+{
+  "name": "lingoguard",
+  "version": "0.0.1",
+  "bin": {
+    "lingoguard": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "postinstall": "node dist/install.js"
+  },
+  "dependencies": {
+    "@lingoguard/cli": "workspace:*"
+  }
+}
