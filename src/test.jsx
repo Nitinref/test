@@ -1,1 +1,1 @@
-<button>button.click Me  </button>
+<button>t("button.clickMe")  </button>
