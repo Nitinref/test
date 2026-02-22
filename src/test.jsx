@@ -1,2 +1,2 @@
-<button>button.click Me 5545  rvget</button>
+<button>t("button.clickMe")</button>
 t("button.click_me")
