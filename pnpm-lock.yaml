@@ -129,6 +129,12 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
+  packages/npm:
+    dependencies:
+      '@lingoguard/cli':
+        specifier: workspace:*
+        version: link:../cli
+
 packages:
 
   '@actions/core@1.11.1':
