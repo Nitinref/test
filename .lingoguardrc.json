@@ -1,0 +1,24 @@
+{
+  "scanPath": "./src",
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "**/dist/**",
+    "**/build/**",
+
+    "**/packages/cli/**",
+    "**/scripts/**",
+    "**/*.config.*",
+    "**/*.d.ts"
+  ],
+  "extensions": [
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx"
+  ],
+  "minHealthScore": 70,
+  "failOnHighSeverity": true,
+  "generateFixes": true
+}
