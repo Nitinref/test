@@ -4,14 +4,19 @@
   "description": "LingoGuard CLI - AST-based i18n quality checker",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": {
-    "lingoguard": "dist/cli.js"
-  },
+ "bin": {
+  "lingoguard": "packages/cli/dist/cli.js"
+},
+ "files": [
+  "packages/cli/dist",
+  "postinstall.js"
+],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "jest",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "postinstall": "node postinstall.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
